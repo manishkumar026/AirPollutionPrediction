@@ -61,17 +61,17 @@ class AQIPredictor:
 
         scaler_path  = os.path.join(self.base, "scaler.pkl")
         weights_path = os.path.join(self.base, "weights.pkl")
-            try:
-                self.models  = joblib.load(models_path)
-                self.scaler  = joblib.load(scaler_path)
-                self.weights = joblib.load(weights_path)
-                model_count  = len(self.models)
-                print(f"Loaded {model_count} ML models successfully!")
-                for name, weight in self.weights.items():
-                    print(f"   {name}: weight = {weight:.4f}")
-                return
-            except Exception as e:
-                print(f"Load error: {e}")
+        try:
+            self.models  = joblib.load(models_path)
+            self.scaler  = joblib.load(scaler_path)
+            self.weights = joblib.load(weights_path)
+            model_count  = len(self.models)
+            print(f"Loaded {model_count} ML models successfully!")
+            for name, weight in self.weights.items():
+                print(f"   {name}: weight = {weight:.4f}")
+            return
+        except Exception as e:
+            print(f"Load error: {e}")
 
         # Never try to train on production/Render (it's too slow)
         if os.environ.get("RENDER") or not os.environ.get("DEBUG", "True") == "True":
