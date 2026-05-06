@@ -320,13 +320,20 @@ class PollutionDataFetcher:
     # GET ALL DATA (Combined)
     # --------------------------------------------------
     def get_all_data(self, lat=DEFAULT_LAT, lon=DEFAULT_LON):
-        p = self.get_current_pollution(lat, lon)
-        f = self.get_pollution_forecast(lat, lon)
-        w = self.get_weather(lat, lon)
+        from concurrent.futures import ThreadPoolExecutor
         
-        # Try official sources
-        waqi = self.get_waqi_aqi(lat, lon)
-        iq = self.get_iqair_data(lat, lon)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            p_task = executor.submit(self.get_current_pollution, lat, lon)
+            f_task = executor.submit(self.get_pollution_forecast, lat, lon)
+            w_task = executor.submit(self.get_weather_data, lat, lon)
+            wa_task = executor.submit(self.get_waqi_aqi, lat, lon)
+            iq_task = executor.submit(self.get_iqair_data, lat, lon)
+            
+            p = p_task.result()
+            f = f_task.result()
+            w = w_task.result()
+            waqi = wa_task.result()
+            iq = iq_task.result()
         
         # Priority 1: WAQI (Official CPCB for India)
         if waqi.get("status") == "success":

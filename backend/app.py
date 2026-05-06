@@ -177,6 +177,8 @@ def dashboard_data():
             "status": "success", "pollution": pollution, "weather": weather, "forecast": forecast,
             "ml_prediction": predictor.predict(pred_input),
             "hourly_prediction": predictor.predict_next_hours(pred_input, 12),
+            "waqi_available": pollution.get("use_official", False),
+            "waqi_station": pollution.get("waqi_station", ""),
             "timestamp": datetime.now().isoformat(), "location": {"lat": lat, "lon": lon},
         })
     except Exception as e:

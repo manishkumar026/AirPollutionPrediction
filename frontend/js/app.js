@@ -1397,7 +1397,26 @@ function useDemo() {
 
     /* updateAllFeatures is already called inside updateLeft above */
     /* REMOVED the duplicate setTimeout call that caused double render */
-    toast('Demo mode - Add API keys for live CPCB data', 'info');
+function normaliseForecast(list) {
+    if (!list || !list.length) return [];
+    return list.map(function (f) {
+        var dt = new Date(f.dt * 1000);
+        var h  = dt.getHours();
+        var ampm = h >= 12 ? 'PM' : 'AM';
+        h = h % 12 || 12;
+        
+        var comps = f.components || {};
+        return {
+            hour_label: h + ampm,
+            aqi: f.aqi || 0,
+            pm2_5: comps.pm2_5 || 0,
+            pm10: comps.pm10 || 0,
+            no2: comps.no2 || 0,
+            o3: comps.o3 || 0,
+            so2: comps.so2 || 0,
+            co: comps.co || 0
+        };
+    });
 }
 
 /* ============================================================

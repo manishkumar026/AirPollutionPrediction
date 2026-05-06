@@ -88,6 +88,9 @@ var charts = (function () {
                 animation           : { duration: 1000, easing: 'easeInOutQuart' },
                 plugins: {
                     legend: { display: false },
+                    annotation: {
+                        annotations: annotations
+                    },
                     tooltip: {
                         backgroundColor  : 'rgba(8,12,25,0.95)',
                         titleColor       : 'rgba(255,255,255,0.9)',
