@@ -65,7 +65,10 @@ class AQIPredictor:
         self._train_new()
 
     def _train_new(self):
-        from model.train_model import MultiModelTrainer
+        try:
+            from model.train_model import MultiModelTrainer
+        except ImportError:
+            from backend.model.train_model import MultiModelTrainer
         trainer      = MultiModelTrainer()
         trainer.train()
         self.models  = trainer.models
