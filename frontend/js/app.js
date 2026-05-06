@@ -60,11 +60,30 @@ function sanitize(str) {
    ============================================================ */
 window.addEventListener('load', async function () {
     const auth = await checkAuth();
-    if (!auth) return; // checkAuth handles redirect
+    if (!auth) return;
 
     startClock();
     setTimeout(hideLoader, 2500);
-    loadAll();
+    
+    // --- Step 1: Try Geolocation first ---
+    if (navigator.geolocation) {
+        console.log('[Geo] Requesting location...');
+        navigator.geolocation.getCurrentPosition(
+            function(pos) {
+                LAT = pos.coords.latitude;
+                LON = pos.coords.longitude;
+                console.log('[Geo] Found:', LAT, LON);
+                loadAll(); // Load with user location
+            },
+            function(err) {
+                console.warn('[Geo] Denied or Error:', err.message);
+                loadAll(); // Fallback to default
+            }
+        );
+    } else {
+        loadAll();
+    }
+
     setInterval(function () { loadAll(true); }, 300000);
     initSearch();
     initKeyboardShortcuts();
