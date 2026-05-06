@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-*.pkl
+# AI models allowed for deployment
+# *.pkl (removed restriction)
 *.h5
 .env
 venv/
