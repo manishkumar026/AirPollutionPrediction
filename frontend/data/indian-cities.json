@@ -1,0 +1,19 @@
+{
+  "cities": [
+    "New Delhi", "Mumbai", "Bangalore", "Hyderabad", "Chennai", "Kolkata", "Delhi", "Pune", "Ahmedabad", "Jaipur",
+    "Lucknow", "Chandigarh", "Indore", "Thane", "Nagpur", "Bhopal", "Visakhapatnam", "Pimpri-Chinchwad", "Patna", "Vadodara",
+    "Ghaziabad", "Ludhiana", "Agra", "Nashik", "Aurangabad", "Dhanbad", "Amritsar", "Navi Mumbai", "Allahabad", "Ranchi",
+    "Howrah", "Coimbatore", "Jabalpur", "Guwahati", "Srinagar", "Noida", "Jodhpur", "Gurgaon", "Erode", "Daman",
+    "Siliguri", "Kochi", "Indore", "Virar", "Kalyan", "Meerut", "Vasai-Virar", "Bhubaneswar", "Thrissur", "Bareilly",
+    "Aligarh", "Moradabad", "Jalandhar", "Tiruchirappalli", "Madurai", "Salem", "Thiruvananthapuram", "Vadodara", "Guwahati", "Chhindwara",
+    "Ujjain", "Durg-Bhilai", "Varanasi", "Surat", "Vadodara", "Rajkot", "Jamnagar", "Gandhinagar", "Junagadh", "Anand",
+    "Bhavnagar", "Porbandar", "Morbi", "Vapi", "Hazira", "Ankleshwar", "Karur", "Namakkal", "Cuddalore", "Kanchipuram",
+    "Pollachi", "Kumbakonam", "Nellore", "Tirupati", "Chittoor", "Ongole", "Guntur", "Vijayawada", "Rajahmundry", "Kakinada",
+    "Narsapur", "Tenali", "Warangal", "Khammam", "Karimnagar", "Adilabad", "Suryapet", "Medak", "Bidar", "Gulbarga",
+    "Kalaburagi", "Belgaum", "Hubli", "Dharwad", "Davangere", "Chitradurga", "Hassan", "Chikmagalur", "Shimoga", "Kodagu",
+    "Udupi", "Mangalore", "Kasaragod", "Kannur", "Thalassery", "Kozhikode", "Malappuram", "Ponnani", "Kottayam", "Pathanamthitta",
+    "Alappuzha", "Kollam", "Attingal", "Agartala", "Silchar", "Shillong", "Imphal", "Aizawl", "Kohima", "Dimapur",
+    "Gangtok", "Thimphu", "Itanagar", "Naharlagun", "Papum Pare", "West Kameng", "Tawang", "Kamrup", "Dima Hasao", "Karbi Anglong",
+    "Nagaland", "Manipur", "Mizoram", "Tripura", "Meghalaya", "Arunachal Pradesh", "Sikkim"
+  ]
+}

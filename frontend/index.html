@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirWatch Pro - Air Quality Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- LOADER -->
+<div id="loader">
+    <div class="ld-box">
+        <div class="ld-spinner"></div>
+        <div class="ld-text">AIRWATCH</div>
+        <div class="ld-sub">Loading air quality data...</div>
+    </div>
+</div>
+
+<!-- BACKGROUND -->
+<canvas id="bgCanvas"></canvas>
+
+<!-- APP -->
+<div class="app">
+
+    <!-- TOPBAR -->
+    <nav class="topbar">
+        <div class="tb-left">
+            <div class="tb-logo">
+                <i class="fas fa-wind"></i>
+                AIRWATCH
+            </div>
+            <div class="tb-live">
+                <span class="blink-dot"></span>
+                LIVE
+            </div>
+        </div>
+
+        <div class="tb-center">
+            <div class="search-wrap">
+                <div class="tb-search">
+                    <i class="fas fa-search"></i>
+                    <input
+                        type="text"
+                        id="citySearch"
+                        placeholder="Search city..."
+                        autocomplete="off"
+                    >
+                    <button onclick="doSearch()">
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+                <div id="acDrop"></div>
+            </div>
+        </div>
+
+        <div class="tb-right">
+            <span class="tb-clock" id="clock">--:--:--</span>
+            <span id="navCity"
+                style="font-size:.78rem;color:var(--txt2)">
+                New Delhi, IN
+            </span>
+            <button class="tb-refresh" onclick="loadAll()"
+                title="Refresh">
+                <i class="fas fa-sync-alt" id="refIcon"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- LAYOUT -->
+    <div class="layout">
+
+        <!-- LEFT PANEL -->
+        <aside class="left-panel">
+
+            <!-- Location -->
+            <div class="loc-header">
+                <div class="loc-icon">
+                    <i class="fas fa-map-marker-alt"></i>
+                </div>
+                <div>
+                    <div class="loc-city" id="locCity">New Delhi</div>
+                    <div class="loc-sub"  id="locSub">IN • Haze</div>
+                </div>
+            </div>
+
+            <!-- ✅ SOURCE BAR - Shows CPCB/OWM/Demo -->
+            <div id="sourceBar" style="
+                display        : flex;
+                align-items    : center;
+                gap            : 6px;
+                padding        : 7px 12px;
+                margin-bottom  : 10px;
+                background     : rgba(45,212,160,0.08);
+                border         : 1px solid rgba(45,212,160,0.2);
+                border-radius  : 8px;
+                font-size      : 0.7rem;
+                transition     : background 0.4s, border 0.4s;
+            ">
+                <span id="sourceDot" style="
+                    width          : 7px;
+                    height         : 7px;
+                    border-radius  : 50%;
+                    background     : #2dd4a0;
+                    animation      : pulse 2s infinite;
+                    flex-shrink    : 0;
+                "></span>
+                <span id="sourceLabel"
+                    style="color:#2dd4a0;font-weight:600;
+                           transition:color 0.3s;">
+                    Loading...
+                </span>
+                <span id="sourceStation"
+                    style="color:var(--txt3);
+                           margin-left:auto;
+                           font-size:0.62rem;
+                           max-width:120px;
+                           overflow:hidden;
+                           text-overflow:ellipsis;
+                           white-space:nowrap;">
+                </span>
+            </div>
+
+            <!-- AQI Display -->
+            <div class="aqi-display" id="aqiDisplay">
+                <div class="aqi-number-box">
+                    <div class="aqi-big-num" id="aqiBigNum">--</div>
+                    <div class="aqi-label">US AQI</div>
+                </div>
+                <div class="aqi-status-pill" id="aqiPill">
+                    Loading...
+                </div>
+                <div class="aqi-message" id="aqiMessage">
+                    Fetching air quality data...
+                </div>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="quick-stats">
+                <div class="qs-item">
+                    <i class="fas fa-thermometer-half"></i>
+                    <div>
+                        <span id="qsTemp">--</span>
+                        <label>°C</label>
+                    </div>
+                </div>
+                <div class="qs-item">
+                    <i class="fas fa-tint"></i>
+                    <div>
+                        <span id="qsHumid">--</span>
+                        <label>%</label>
+                    </div>
+                </div>
+                <div class="qs-item">
+                    <i class="fas fa-wind"></i>
+                    <div>
+                        <span id="qsWind">--</span>
+                        <label>m/s</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dominant Pollutant -->
+            <div class="advice-box" style="padding:12px 14px">
+                <div class="ab-title">
+                    <i class="fas fa-atom"></i>
+                    Dominant Pollutant
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span id="domPoll"
+                        style="font-size:1.4rem;font-weight:900;
+                               color:var(--accent)">--</span>
+                    <span id="domDesc"
+                        style="font-size:0.72rem;
+                               color:var(--txt2)">--</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;
+                            gap:6px;margin-top:10px">
+                    <span class="bd-badge" id="bd-pm25">PM2.5</span>
+                    <span class="bd-badge" id="bd-pm10">PM10</span>
+                    <span class="bd-badge" id="bd-no2">NO2</span>
+                    <span class="bd-badge" id="bd-o3">O3</span>
+                    <span class="bd-badge" id="bd-co">CO</span>
+                    <span class="bd-badge" id="bd-so2">SO2</span>
+                </div>
+            </div>
+
+            <!-- Health Advice -->
+            <div class="advice-box">
+                <div class="ab-title">
+                    <i class="fas fa-heartbeat"></i>
+                    Health Advice
+                </div>
+                <div class="ab-list" id="adviceList">
+                    <div class="ab-item">
+                        <i class="fas fa-spinner fa-spin"
+                            style="color:var(--accent)"></i>
+                        <span>Loading health tips...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Weather + Feels Like -->
+            <div class="advice-box" style="padding:12px 14px">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <img id="weatherIcon" src="" alt="weather"
+                        style="width:48px;height:48px;display:none">
+                    <div>
+                        <div style="font-size:0.72rem;
+                                    color:var(--txt2)">
+                            Feels Like
+                        </div>
+                        <div id="wiFeels"
+                            style="font-size:1.1rem;
+                                   font-weight:700">
+                            --°C
+                        </div>
+                    </div>
+                    <div style="margin-left:auto">
+                        <div style="font-size:0.72rem;
+                                    color:var(--txt2)">
+                            Heat Index
+                        </div>
+                        <div id="heatIndex"
+                            style="font-size:1rem;
+                                   font-weight:700;
+                                   color:var(--org)">
+                            --°C
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:16px;margin-top:10px">
+                    <div>
+                        <div style="font-size:0.68rem;
+                                    color:var(--txt3)">
+                            Sunrise
+                        </div>
+                        <div id="wiSun"
+                            style="font-size:0.85rem;
+                                   font-weight:600;
+                                   color:#ffeb3b">--</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.68rem;
+                                    color:var(--txt3)">
+                            Sunset
+                        </div>
+                        <div id="wiSunset"
+                            style="font-size:0.85rem;
+                                   font-weight:600;
+                                   color:var(--org)">--</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.68rem;
+                                    color:var(--txt3)">
+                            Dew Point
+                        </div>
+                        <div id="dewPoint"
+                            style="font-size:0.85rem;
+                                   font-weight:600;
+                                   color:var(--accent)">
+                            --°C
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AQI Scale -->
+            <div class="scale-box">
+                <div class="sb-title">AQI Scale</div>
+                <div class="sb-bar">
+                    <div class="sb-seg"
+                        style="background:#00e400"></div>
+                    <div class="sb-seg"
+                        style="background:#ffff00"></div>
+                    <div class="sb-seg"
+                        style="background:#ff7e00"></div>
+                    <div class="sb-seg"
+                        style="background:#ff0000"></div>
+                    <div class="sb-seg"
+                        style="background:#8f3f97"></div>
+                    <div class="sb-seg"
+                        style="background:#7e0023"></div>
+                </div>
+                <div class="sb-labels">
+                    <span>0</span><span>50</span>
+                    <span>100</span><span>150</span>
+                    <span>200</span><span>300</span>
+                    <span>500</span>
+                </div>
+                <div class="sb-pointer">
+                    <div class="sb-arrow" id="scalePointer"
+                        style="left:0%"></div>
+                </div>
+            </div>
+
+            <!-- Last Updated -->
+            <div class="last-updated" id="lastUpdated">
+                <i class="fas fa-clock"></i>
+                <span>Waiting for data...</span>
+            </div>
+
+        </aside>
+
+        <!-- RIGHT PANEL -->
+        <main class="right-panel">
+
+            <!-- Alerts -->
+            <div class="section-title mt16">
+                <i class="fas fa-bell"></i>
+                <span>Pollution Alerts</span>
+                <span id="alertBadge"
+                    style="display:none;background:#f44;
+                           color:#fff;border-radius:50%;
+                           width:18px;height:18px;
+                           font-size:0.65rem;font-weight:700;
+                           align-items:center;
+                           justify-content:center;
+                           margin-left:4px">
+                </span>
+            </div>
+            <div class="alerts-wrap" id="alertsWrap">
+                <div class="alert-item info">
+                    <i class="fas fa-info-circle"></i>
+                    <span>Loading alerts...</span>
+                </div>
+            </div>
+
+            <!-- Pollutant Cards -->
+            <div class="section-title">
+                <i class="fas fa-smog"></i>
+                <span>Pollutant Levels</span>
+            </div>
+            <div class="pollutant-row">
+                <div class="p-card" id="p-pm25">
+                    <div class="p-head">
+                        <span class="p-label">PM2.5</span>
+                        <span class="p-badge" id="pb-pm25">--</span>
+                    </div>
+                    <span class="p-value" id="pv-pm25">--</span>
+                    <div class="p-unit">µg/m³</div>
+                    <div class="p-bar-wrap">
+                        <div class="p-bar" id="pbar-pm25"></div>
+                    </div>
+                    <div class="p-who">WHO: 15 µg/m³</div>
+                    <div class="p-limit" id="plimit-pm25"></div>
+                </div>
+                <div class="p-card" id="p-pm10">
+                    <div class="p-head">
+                        <span class="p-label">PM10</span>
+                        <span class="p-badge" id="pb-pm10">--</span>
+                    </div>
+                    <span class="p-value" id="pv-pm10">--</span>
+                    <div class="p-unit">µg/m³</div>
+                    <div class="p-bar-wrap">
+                        <div class="p-bar" id="pbar-pm10"></div>
+                    </div>
+                    <div class="p-who">WHO: 45 µg/m³</div>
+                    <div class="p-limit" id="plimit-pm10"></div>
+                </div>
+                <div class="p-card" id="p-no2">
+                    <div class="p-head">
+                        <span class="p-label">NO₂</span>
+                        <span class="p-badge" id="pb-no2">--</span>
+                    </div>
+                    <span class="p-value" id="pv-no2">--</span>
+                    <div class="p-unit">µg/m³</div>
+                    <div class="p-bar-wrap">
+                        <div class="p-bar" id="pbar-no2"></div>
+                    </div>
+                    <div class="p-who">WHO: 25 µg/m³</div>
+                    <div class="p-limit" id="plimit-no2"></div>
+                </div>
+                <div class="p-card" id="p-o3">
+                    <div class="p-head">
+                        <span class="p-label">O₃</span>
+                        <span class="p-badge" id="pb-o3">--</span>
+                    </div>
+                    <span class="p-value" id="pv-o3">--</span>
+                    <div class="p-unit">µg/m³</div>
+                    <div class="p-bar-wrap">
+                        <div class="p-bar" id="pbar-o3"></div>
+                    </div>
+                    <div class="p-who">WHO: 100 µg/m³</div>
+                    <div class="p-limit" id="plimit-o3"></div>
+                </div>
+                <div class="p-card" id="p-co">
+                    <div class="p-head">
+                        <span class="p-label">CO</span>
+                        <span class="p-badge" id="pb-co">--</span>
+                    </div>
+                    <span class="p-value" id="pv-co">--</span>
+                    <div class="p-unit">µg/m³</div>
+                    <div class="p-bar-wrap">
+                        <div class="p-bar" id="pbar-co"></div>
+                    </div>
+                    <div class="p-who">Limit: 4000</div>
+                    <div class="p-limit" id="plimit-co"></div>
+                </div>
+                <div class="p-card" id="p-so2">
+                    <div class="p-head">
+                        <span class="p-label">SO₂</span>
+                        <span class="p-badge" id="pb-so2">--</span>
+                    </div>
+                    <span class="p-value" id="pv-so2">--</span>
+                    <div class="p-unit">µg/m³</div>
+                    <div class="p-bar-wrap">
+                        <div class="p-bar" id="pbar-so2"></div>
+                    </div>
+                    <div class="p-who">WHO: 40 µg/m³</div>
+                    <div class="p-limit" id="plimit-so2"></div>
+                </div>
+            </div>
+
+            <!-- 24-Hour Trend -->
+            <div class="section-title">
+                <i class="fas fa-chart-line"></i>
+                <span>24-Hour Trend</span>
+                <div class="tab-btns">
+                    <button class="tab-btn active"
+                        onclick="changeTab('aqi',this)">
+                        AQI
+                    </button>
+                    <button class="tab-btn"
+                        onclick="changeTab('pm25',this)">
+                        PM2.5
+                    </button>
+                    <button class="tab-btn"
+                        onclick="changeTab('pm10',this)">
+                        PM10
+                    </button>
+                    <button class="tab-btn"
+                        onclick="changeTab('no2',this)">
+                        NO2
+                    </button>
+                    <button class="tab-btn"
+                        onclick="changeTab('o3',this)">
+                        O3
+                    </button>
+                </div>
+            </div>
+            <div class="chart-wrap">
+                <canvas id="trendChart"></canvas>
+            </div>
+
+            <!-- Weather + AI Forecast -->
+            <div class="two-col">
+                <div class="info-card">
+                    <div class="ic-title">
+                        <i class="fas fa-cloud-sun"></i>
+                        Weather Conditions
+                    </div>
+                    <div class="weather-items">
+                        <div class="wi">
+                            <div class="wi-icon t">
+                                <i class="fas fa-thermometer-half"></i>
+                            </div>
+                            <div>
+                                <div class="wi-val" id="wiTemp">
+                                    --°C
+                                </div>
+                                <div class="wi-lbl">Temperature</div>
+                            </div>
+                        </div>
+                        <div class="wi">
+                            <div class="wi-icon h">
+                                <i class="fas fa-tint"></i>
+                            </div>
+                            <div>
+                                <div class="wi-val" id="wiHumid">
+                                    --%
+                                </div>
+                                <div class="wi-lbl">Humidity</div>
+                            </div>
+                        </div>
+                        <div class="wi">
+                            <div class="wi-icon w">
+                                <i class="fas fa-wind"></i>
+                            </div>
+                            <div>
+                                <div class="wi-val" id="wiWind">
+                                    -- m/s
+                                </div>
+                                <div class="wi-lbl">Wind Speed</div>
+                            </div>
+                        </div>
+                        <div class="wi">
+                            <div class="wi-icon p">
+                                <i class="fas fa-tachometer-alt"></i>
+                            </div>
+                            <div>
+                                <div class="wi-val" id="wiPres">
+                                    -- hPa
+                                </div>
+                                <div class="wi-lbl">Pressure</div>
+                            </div>
+                        </div>
+                        <div class="wi">
+                            <div class="wi-icon v">
+                                <i class="fas fa-eye"></i>
+                            </div>
+                            <div>
+                                <div class="wi-val" id="wiVis">
+                                    -- km
+                                </div>
+                                <div class="wi-lbl">Visibility</div>
+                            </div>
+                        </div>
+                        <div class="wi">
+                            <div class="wi-icon s">
+                                <i class="fas fa-sun"></i>
+                            </div>
+                            <div>
+                                <div class="wi-val" id="wiSunset2">
+                                    --
+                                </div>
+                                <div class="wi-lbl">Sunset</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Forecast -->
+                <div class="info-card">
+                    <div class="ic-title">
+                        <i class="fas fa-robot"></i>
+                        AI AQI Forecast
+                    </div>
+                    <div class="ai-forecast">
+                        <div class="af-row">
+                            <span class="af-time">+1 Hour</span>
+                            <div class="af-bar-wrap">
+                                <div class="af-bar" id="af1"></div>
+                            </div>
+                            <span class="af-val" id="afv1">--</span>
+                        </div>
+                        <div class="af-row">
+                            <span class="af-time">+3 Hours</span>
+                            <div class="af-bar-wrap">
+                                <div class="af-bar" id="af3"></div>
+                            </div>
+                            <span class="af-val" id="afv3">--</span>
+                        </div>
+                        <div class="af-row">
+                            <span class="af-time">+6 Hours</span>
+                            <div class="af-bar-wrap">
+                                <div class="af-bar" id="af6"></div>
+                            </div>
+                            <span class="af-val" id="afv6">--</span>
+                        </div>
+                        <div class="af-row">
+                            <span class="af-time">+12 Hours</span>
+                            <div class="af-bar-wrap">
+                                <div class="af-bar" id="af12"></div>
+                            </div>
+                            <span class="af-val" id="afv12">--</span>
+                        </div>
+                        <div class="af-row">
+                            <span class="af-time">+24 Hours</span>
+                            <div class="af-bar-wrap">
+                                <div class="af-bar" id="af24"></div>
+                            </div>
+                            <span class="af-val" id="afv24">--</span>
+                        </div>
+                    </div>
+                    <div style="margin-top:14px;
+                                border-top:1px solid var(--brd);
+                                padding-top:12px">
+                        <div style="font-size:0.7rem;
+                                    color:var(--txt2);
+                                    margin-bottom:8px;
+                                    font-weight:600">
+                            ML MODEL COMPARISON
+                        </div>
+                        <div class="model-bar-wrap">
+                            <span style="font-size:0.65rem;
+                                         color:var(--txt3);
+                                         width:100px;
+                                         flex-shrink:0">
+                                Gradient Boost
+                            </span>
+                            <div class="model-bar-track">
+                                <div class="model-bar"
+                                    id="mb-gb"></div>
+                            </div>
+                            <span class="af-val" id="mb-gb-num"
+                                style="width:35px">--</span>
+                        </div>
+                        <div class="model-bar-wrap">
+                            <span style="font-size:0.65rem;
+                                         color:var(--txt3);
+                                         width:100px;
+                                         flex-shrink:0">
+                                Random Forest
+                            </span>
+                            <div class="model-bar-track">
+                                <div class="model-bar"
+                                    id="mb-rf"></div>
+                            </div>
+                            <span class="af-val" id="mb-rf-num"
+                                style="width:35px">--</span>
+                        </div>
+                        <div class="model-bar-wrap">
+                            <span style="font-size:0.65rem;
+                                         color:var(--txt3);
+                                         width:100px;
+                                         flex-shrink:0">
+                                AdaBoost
+                            </span>
+                            <div class="model-bar-track">
+                                <div class="model-bar"
+                                    id="mb-ada"></div>
+                            </div>
+                            <span class="af-val" id="mb-ada-num"
+                                style="width:35px">--</span>
+                        </div>
+                        <div class="model-bar-wrap">
+                            <span style="font-size:0.65rem;
+                                         color:var(--txt3);
+                                         width:100px;
+                                         flex-shrink:0">
+                                Ridge
+                            </span>
+                            <div class="model-bar-track">
+                                <div class="model-bar"
+                                    id="mb-rid"></div>
+                            </div>
+                            <span class="af-val" id="mb-rid-num"
+                                style="width:35px">--</span>
+                        </div>
+                        <div class="model-bar-wrap">
+                            <span style="font-size:0.65rem;
+                                         color:var(--accent);
+                                         width:100px;
+                                         flex-shrink:0;
+                                         font-weight:700">
+                                Ensemble
+                            </span>
+                            <div class="model-bar-track">
+                                <div class="model-bar"
+                                    id="mb-ens"></div>
+                            </div>
+                            <span class="af-val" id="mb-ens-num"
+                                style="width:35px">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Predictor -->
+            <div class="section-title mt16">
+                <i class="fas fa-brain"></i>
+                <span>AI AQI Predictor</span>
+            </div>
+            <div class="predictor-wrap">
+                <div>
+                    <div class="pw-fields">
+                        <div class="pw-f">
+                            <label>Temperature (°C)</label>
+                            <input type="number"
+                                id="f-temp" value="28">
+                        </div>
+                        <div class="pw-f">
+                            <label>Humidity (%)</label>
+                            <input type="number"
+                                id="f-humid" value="65">
+                        </div>
+                        <div class="pw-f">
+                            <label>Wind (m/s)</label>
+                            <input type="number"
+                                id="f-wind" value="4">
+                        </div>
+                        <div class="pw-f">
+                            <label>Pressure (hPa)</label>
+                            <input type="number"
+                                id="f-pres" value="1013">
+                        </div>
+                        <div class="pw-f">
+                            <label>PM2.5 (µg/m³)</label>
+                            <input type="number"
+                                id="f-pm25" value="55">
+                        </div>
+                        <div class="pw-f">
+                            <label>PM10 (µg/m³)</label>
+                            <input type="number"
+                                id="f-pm10" value="90">
+                        </div>
+                        <div class="pw-f">
+                            <label>NO₂ (µg/m³)</label>
+                            <input type="number"
+                                id="f-no2" value="35">
+                        </div>
+                        <div class="pw-f">
+                            <label>O₃ (µg/m³)</label>
+                            <input type="number"
+                                id="f-o3" value="45">
+                        </div>
+                        <div class="pw-f">
+                            <label>CO (µg/m³)</label>
+                            <input type="number"
+                                id="f-co" value="800">
+                        </div>
+                        <div class="pw-f">
+                            <label>SO₂ (µg/m³)</label>
+                            <input type="number"
+                                id="f-so2" value="15">
+                        </div>
+                    </div>
+                    <div class="pw-btns">
+                        <button class="pw-auto"
+                            onclick="autoFillForm()">
+                            <i class="fas fa-magic"></i>
+                            Auto-fill Live Data
+                        </button>
+                        <button class="pw-predict predict-btn"
+                            onclick="doPrediction()">
+                            <i class="fas fa-brain"></i>
+                            PREDICT AQI
+                        </button>
+                    </div>
+                </div>
+                <div class="pw-result">
+                    <div class="pwr-num" id="pwrNum">--</div>
+                    <div class="pwr-cat" id="pwrCat">
+                        Run Prediction
+                    </div>
+                    <div class="pwr-msg" id="pwrMsg">
+                        Enter values and click predict
+                    </div>
+                    <div id="pwrDom"
+                        style="font-size:0.7rem;
+                               color:var(--accent);
+                               margin-top:6px"></div>
+                    <div id="pwrConf"
+                        style="font-size:0.7rem;
+                               color:var(--txt2);
+                               margin-top:4px"></div>
+                    <div style="margin-top:10px;width:100%;
+                                border-top:1px solid var(--brd);
+                                padding-top:8px">
+                        <div style="font-size:0.62rem;
+                                    color:var(--txt3);
+                                    margin-bottom:6px">
+                            CONTRIBUTING FACTORS
+                        </div>
+                        <div style="display:flex;
+                                    flex-wrap:wrap;gap:4px">
+                            <span style="font-size:0.65rem;
+                                         background:var(--card2);
+                                         padding:2px 8px;
+                                         border-radius:4px">
+                                Wind: <b id="fac-wind">--</b>
+                            </span>
+                            <span style="font-size:0.65rem;
+                                         background:var(--card2);
+                                         padding:2px 8px;
+                                         border-radius:4px">
+                                Humidity: <b id="fac-hum">--</b>
+                            </span>
+                            <span style="font-size:0.65rem;
+                                         background:var(--card2);
+                                         padding:2px 8px;
+                                         border-radius:4px">
+                                Temp: <b id="fac-temp">--</b>
+                            </span>
+                            <span style="font-size:0.65rem;
+                                         background:var(--card2);
+                                         padding:2px 8px;
+                                         border-radius:4px">
+                                Season: <b id="fac-season">--</b>
+                            </span>
+                            <span style="font-size:0.65rem;
+                                         background:var(--card2);
+                                         padding:2px 8px;
+                                         border-radius:4px">
+                                Hour: <b id="fac-hour">--</b>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Speedometer -->
+            <div class="section-title mt16">
+                <i class="fas fa-tachometer-alt"></i>
+                <span>AQI Speedometer</span>
+            </div>
+            <div class="speedo-wrap">
+                <canvas id="speedoCanvas"
+                    width="400" height="220"></canvas>
+                <div class="speedo-info">
+                    <div class="si-num" id="speedoNum">--</div>
+                    <div class="si-cat" id="speedoCat">--</div>
+                </div>
+            </div>
+
+            <!-- City Comparison -->
+            <div class="section-title mt16">
+                <i class="fas fa-city"></i>
+                <span>City Comparison</span>
+                <span style="
+                    font-size   : 0.6rem;
+                    background  : rgba(45,212,160,0.12);
+                    color       : #2dd4a0;
+                    border      : 1px solid rgba(45,212,160,0.3);
+                    padding     : 2px 8px;
+                    border-radius: 20px;
+                    margin-left : 8px;
+                    font-weight : 600;">
+                    📍 CPCB Ground Data
+                </span>
+            </div>
+            <div class="city-compare">
+                <div class="cc-card">
+                    <div class="cc-name">Delhi</div>
+                    <div class="cc-aqi"
+                        id="cc-aqi-delhi">--</div>
+                    <div class="cc-bar-wrap">
+                        <div class="cc-bar"
+                            id="cc-bar-delhi"></div>
+                    </div>
+                    <div class="cc-status"
+                        id="cc-st-delhi">--</div>
+                </div>
+                <div class="cc-card">
+                    <div class="cc-name">Mumbai</div>
+                    <div class="cc-aqi"
+                        id="cc-aqi-mumbai">--</div>
+                    <div class="cc-bar-wrap">
+                        <div class="cc-bar"
+                            id="cc-bar-mumbai"></div>
+                    </div>
+                    <div class="cc-status"
+                        id="cc-st-mumbai">--</div>
+                </div>
+                <div class="cc-card">
+                    <div class="cc-name">Kolkata</div>
+                    <div class="cc-aqi"
+                        id="cc-aqi-kolkata">--</div>
+                    <div class="cc-bar-wrap">
+                        <div class="cc-bar"
+                            id="cc-bar-kolkata"></div>
+                    </div>
+                    <div class="cc-status"
+                        id="cc-st-kolkata">--</div>
+                </div>
+                <div class="cc-card">
+                    <div class="cc-name">Bangalore</div>
+                    <div class="cc-aqi"
+                        id="cc-aqi-bangalore">--</div>
+                    <div class="cc-bar-wrap">
+                        <div class="cc-bar"
+                            id="cc-bar-bangalore"></div>
+                    </div>
+                    <div class="cc-status"
+                        id="cc-st-bangalore">--</div>
+                </div>
+                <div class="cc-card">
+                    <div class="cc-name">Chennai</div>
+                    <div class="cc-aqi"
+                        id="cc-aqi-chennai">--</div>
+                    <div class="cc-bar-wrap">
+                        <div class="cc-bar"
+                            id="cc-bar-chennai"></div>
+                    </div>
+                    <div class="cc-status"
+                        id="cc-st-chennai">--</div>
+                </div>
+                <div class="cc-card">
+                    <div class="cc-name">Hyderabad</div>
+                    <div class="cc-aqi"
+                        id="cc-aqi-hyderabad">--</div>
+                    <div class="cc-bar-wrap">
+                        <div class="cc-bar"
+                            id="cc-bar-hyderabad"></div>
+                    </div>
+                    <div class="cc-status"
+                        id="cc-st-hyderabad">--</div>
+                </div>
+            </div>
+
+            <!-- Heatmap -->
+            <div class="section-title mt16">
+                <i class="fas fa-map"></i>
+                <span>24-Hour Pollution Heatmap</span>
+            </div>
+            <div class="heatmap-wrap">
+                <canvas id="heatmapCanvas"
+                    width="800" height="120"></canvas>
+                <div class="hm-legend">
+                    <span style="color:#00e400">● Good</span>
+                    <span style="color:#ffff00">● Moderate</span>
+                    <span style="color:#ff7e00">● USG</span>
+                    <span style="color:#ff0000">● Unhealthy</span>
+                    <span style="color:#8f3f97">
+                        ● Very Unhealthy
+                    </span>
+                    <span style="color:#7e0023">● Hazardous</span>
+                </div>
+            </div>
+
+            <!-- Wind + Radar -->
+            <div class="two-col mt16">
+                <div class="info-card">
+                    <div class="ic-title">
+                        <i class="fas fa-compass"></i>
+                        Wind Direction
+                    </div>
+                    <div class="compass-wrap">
+                        <canvas id="compassCanvas"
+                            width="200" height="200"></canvas>
+                        <div class="compass-info">
+                            <div id="windDeg">--°</div>
+                            <div id="windDir">--</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="info-card">
+                    <div class="ic-title">
+                        <i class="fas fa-chart-bar"></i>
+                        Pollutant Radar
+                    </div>
+                    <div class="extra-chart-wrap">
+                        <canvas id="radarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AQI Sub-Index Breakdown -->
+            <div class="section-title mt16">
+                <i class="fas fa-chart-bar"></i>
+                <span>AQI Sub-Index Breakdown</span>
+            </div>
+            <div class="chart-card-full">
+                <div class="extra-chart-wrap"
+                    style="height:220px">
+                    <canvas id="breakdownChart"></canvas>
+                </div>
+            </div>
+
+            <!-- PM2.5 vs PM10 -->
+            <div class="section-title mt16">
+                <i class="fas fa-chart-area"></i>
+                <span>PM2.5 vs PM10 Trend</span>
+            </div>
+            <div class="chart-card-full">
+                <div class="chart-tall">
+                    <canvas id="compareChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Pollutant Distribution -->
+            <div class="section-title mt16">
+                <i class="fas fa-chart-pie"></i>
+                <span>Pollutant Distribution</span>
+            </div>
+            <div class="chart-card-full">
+                <div class="chart-tall">
+                    <canvas id="polarChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Historical Data -->
+            <div class="section-title mt16">
+                <i class="fas fa-history"></i>
+                <span>Historical Data (24 Hours)</span>
+            </div>
+            <div class="history-table-wrap">
+                <table class="history-table"
+                    id="historyTable">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>AQI</th>
+                            <th>PM2.5</th>
+                            <th>PM10</th>
+                            <th>NO₂</th>
+                            <th>O₃</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody">
+                        <tr>
+                            <td colspan="7"
+                                style="text-align:center;
+                                       color:var(--txt3);
+                                       padding:20px">
+                                <i class="fas fa-spinner
+                                    fa-spin"></i>
+                                Loading data...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Download -->
+            <div class="section-title mt16">
+                <i class="fas fa-download"></i>
+                <span>Download Report</span>
+            </div>
+            <div class="download-wrap">
+                <button class="dl-btn" onclick="downloadPDF()">
+                    <i class="fas fa-file-alt"></i>
+                    Download Report
+                </button>
+                <button class="dl-btn csv"
+                    onclick="downloadCSV()">
+                    <i class="fas fa-file-csv"></i>
+                    Download CSV
+                </button>
+                <button class="dl-btn img"
+                    onclick="downloadImage()">
+                    <i class="fas fa-image"></i>
+                    Save Gauge Image
+                </button>
+            </div>
+
+            <!-- ✅ FOOTER - updated with dynamic source -->
+            <footer class="app-footer">
+                AirWatch Pro &nbsp;|&nbsp;
+                Data: <span id="dataSource">
+                    CPCB Ground Station (WAQI)
+                </span> &nbsp;|&nbsp;
+                Standard: <span>US EPA 2024</span>
+                &nbsp;|&nbsp;
+                Built with <span>❤</span> for clean air
+            </footer>
+
+        </main>
+    </div>
+</div>
+
+<!-- Theme Toggle -->
+<button class="theme-toggle" onclick="toggleTheme()">
+    <i class="fas fa-moon" id="themeIcon"></i>
+</button>
+
+<!-- Toast -->
+<div id="toast">
+    <i id="toastIcon" class="fas fa-check-circle"></i>
+    <span id="toastMsg">Notification</span>
+</div>
+
+<!-- ✅ SCRIPTS - CORRECT ORDER - DO NOT CHANGE -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="js/toast.js"></script>
+<script src="js/api-handler.js"></script>
+<script src="js/autocomplete.js"></script>
+<script src="js/timelive.js"></script>
+<script src="js/live-location.js"></script>
+<script src="js/three-scene.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
