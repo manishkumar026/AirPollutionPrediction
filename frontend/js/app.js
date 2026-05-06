@@ -1011,9 +1011,10 @@ async function showAutocomplete(query) {
         var other  = results.filter(function (c) { return !c.isIndian; });
 
         var makeItem = function (c) {
-            var flag = c.country
+            var flagCode = c.country_code || c.country || '';
+            var flag = flagCode
                 ? '<img src="https://flagcdn.com/20x15/'
-                  + sanitize(c.country.toLowerCase())
+                  + sanitize(flagCode.toLowerCase())
                   + '.png" onerror="this.style.display=\'none\'" '
                   + 'style="margin-right:8px;border-radius:2px">'
                 : '';
@@ -1026,7 +1027,7 @@ async function showAutocomplete(query) {
                 + '<span class="ac-name">' + sanitize(c.name) + '</span>'
                 + '<span class="ac-sub">'
                 + (c.state ? sanitize(c.state) + ', ' : '')
-                + sanitize(c.country)
+                + sanitize(c.country || '')
                 + '</span></div></div>';
         };
 

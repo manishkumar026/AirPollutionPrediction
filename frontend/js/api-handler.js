@@ -26,25 +26,23 @@ var api = (function () {
     /* ── OpenWeatherMap API Key ──────────────────────────────── */
     var OWM_KEY = '1cc153b8da9c132a0ede08d220b59a60';
 
-    /* ── WAQI Token (CPCB Ground Station Data) ──────────────── */
-    var WAQI_TOKEN = 'c12943ab88ad31947b8aaf9568a9633988c61ce7';
+    /* ── IQAir Token (Real-time AQI) ────────────────────────── */
+    var IQAIR_KEY = '27636e29-836f-490f-bc7f-01b3871d8b8e';
 
     /* ── OWM Endpoints ──────────────────────────────────────── */
     var URL_AIR      = 'https://api.openweathermap.org/data/2.5/air_pollution';
     var URL_FORECAST = 'https://api.openweathermap.org/data/2.5/air_pollution/forecast';
     var URL_WEATHER  = 'https://api.openweathermap.org/data/2.5/weather';
-    var URL_GEO      = 'https://api.openweathermap.org/geo/1.0/direct';
 
-    /* ── WAQI Endpoint ──────────────────────────────────────── */
-    var WAQI_BASE = 'https://api.waqi.info';
+    /* ── IQAir Endpoint ─────────────────────────────────────── */
+    var URL_IQAIR = 'https://api.airvisual.com/v2/nearest_city';
+    
+    /* ── Nominatim Endpoint (Search) ────────────────────────── */
+    var URL_GEO = 'https://nominatim.openstreetmap.org/search';
 
     /* ── CO Conversion Constant (µg/m³ per ppm) ─────────────── */
     /* Fixed: unified with app.js CONV object value             */
     var CO_FACTOR = 1145.45;
-
-    /* ── Indian cities list ─────────────────────────────────── */
-    var INDIA_CITIES        = [];
-    var INDIA_CITIES_LOADED = false;
 
     /* ── Data source tracker ────────────────────────────────── */
     var DATA_SOURCE = 'Unknown';
@@ -52,11 +50,9 @@ var api = (function () {
     /* ============================================================
        KEY VALIDATORS
        ============================================================ */
-    function waqiOk() {
-        return typeof WAQI_TOKEN === 'string'
-            && WAQI_TOKEN.trim().length > 10
-            && WAQI_TOKEN !== 'YOUR_WAQI_TOKEN_HERE'
-            && WAQI_TOKEN !== 'demo';
+    function iqairOk() {
+        return typeof IQAIR_KEY === 'string'
+            && IQAIR_KEY.trim().length > 10;
     }
 
     function keyOk() {
@@ -111,124 +107,41 @@ var api = (function () {
     }
 
     /* ============================================================
-       WAQI: GET NEAREST STATION BY LAT/LON
-       Fixed: handles "-" AQI value from WAQI
+       IQAIR: GET NEAREST STATION BY LAT/LON
        ============================================================ */
-    async function fetchWAQI_NearestStation(lat, lon) {
-        var url = WAQI_BASE
-            + '/feed/geo:' + lat + ';' + lon
-            + '/?token=' + WAQI_TOKEN;
+    async function fetchIQAir_NearestStation(lat, lon) {
+        var url = URL_IQAIR
+            + '?lat=' + lat + '&lon=' + lon
+            + '&key=' + IQAIR_KEY;
 
-        console.log('%c[WAQI] Fetching nearest CPCB station...',
-            'color:#2dd4a0');
+        console.log('%c[IQAir] Fetching real-time AQI...', 'color:#2dd4a0');
 
         try {
             var res  = await fetchT(url, 12);
             var data = await safeJson(res);
 
-            if (!data) {
-                console.warn('[WAQI] Empty or invalid JSON response');
+            if (!data || data.status !== 'success') {
+                console.warn('[IQAir] Status not success:', data);
                 return null;
             }
 
-            if (data.status !== 'ok') {
-                console.warn('[WAQI] Status not ok:', data.data || data);
-                return null;
-            }
-
-            var d    = data.data;
-            var iaqi = d.iaqi || {};
-
-            /* Fixed: WAQI sometimes returns "-" for AQI */
-            var rawAqi = parseInt(d.aqi);
-            if (!rawAqi || isNaN(rawAqi) || rawAqi <= 0) {
-                console.warn('[WAQI] Invalid AQI value:', d.aqi);
-                return null;
-            }
+            var d = data.data;
+            var aqi = d.current.pollution.aqius;
 
             console.log(
-                '%c[WAQI] ✅ CPCB Station: '
-                + (d.city && d.city.name ? d.city.name : 'Unknown')
-                + ' | Official AQI: ' + rawAqi,
+                '%c[IQAir] ✅ City: ' + d.city + ' | Official AQI: ' + aqi,
                 'color:#2dd4a0;font-weight:bold;font-size:13px'
             );
 
             return {
-                station      : d.city  ? d.city.name : 'Unknown',
-                station_url  : d.city  ? d.city.url  : '',
-                station_geo  : d.city  ? d.city.geo  : [lat, lon],
-                station_idx  : d.idx   || 0,
-
-                /* Valid, parsed official AQI */
-                official_aqi : rawAqi,
-
-                /*
-                 * WAQI iaqi values are AQI SUB-INDICES
-                 * NOT raw concentration values
-                 */
-                pollutants : {
-                    pm2_5    : iaqi.pm25 ? iaqi.pm25.v : null,
-                    pm10     : iaqi.pm10 ? iaqi.pm10.v : null,
-                    no2      : iaqi.no2  ? iaqi.no2.v  : null,
-                    o3       : iaqi.o3   ? iaqi.o3.v   : null,
-                    co       : iaqi.co   ? iaqi.co.v   : null,
-                    so2      : iaqi.so2  ? iaqi.so2.v  : null,
-                    temp     : iaqi.t    ? iaqi.t.v    : null,
-                    humidity : iaqi.h    ? iaqi.h.v    : null,
-                    wind     : iaqi.w    ? iaqi.w.v    : null,
-                    pressure : iaqi.p    ? iaqi.p.v    : null,
-                },
-
-                data_type    : 'sub_index',
-                attributions : d.attributions || [],
-                timestamp    : d.time ? d.time.iso : new Date().toISOString(),
-                forecast     : d.forecast ? d.forecast.daily : {},
+                station: d.city + (d.state ? ', ' + d.state : '') + (d.country ? ', ' + d.country : ''),
+                official_aqi: aqi,
+                main_pollutant: d.current.pollution.mainus,
+                timestamp: d.current.pollution.ts
             };
 
         } catch (e) {
-            console.error('[WAQI] Station fetch error:', e.message);
-            return null;
-        }
-    }
-
-    /* ============================================================
-       WAQI: GET BY CITY NAME
-       ============================================================ */
-    async function fetchWAQI_ByCity(cityName) {
-        var url = WAQI_BASE
-            + '/feed/' + encodeURIComponent(cityName)
-            + '/?token=' + WAQI_TOKEN;
-
-        try {
-            var res  = await fetchT(url, 10);
-            var data = await safeJson(res);
-
-            if (!data || data.status !== 'ok') return null;
-
-            var d    = data.data;
-            var iaqi = d.iaqi || {};
-
-            /* Fixed: validate AQI value */
-            var rawAqi = parseInt(d.aqi);
-            if (!rawAqi || isNaN(rawAqi) || rawAqi <= 0) return null;
-
-            return {
-                station      : d.city  ? d.city.name : cityName,
-                official_aqi : rawAqi,
-                pollutants   : {
-                    pm2_5 : iaqi.pm25 ? iaqi.pm25.v : null,
-                    pm10  : iaqi.pm10 ? iaqi.pm10.v : null,
-                    no2   : iaqi.no2  ? iaqi.no2.v  : null,
-                    o3    : iaqi.o3   ? iaqi.o3.v   : null,
-                    co    : iaqi.co   ? iaqi.co.v   : null,
-                    so2   : iaqi.so2  ? iaqi.so2.v  : null,
-                },
-                data_type : 'sub_index',
-                timestamp : d.time ? d.time.iso : new Date().toISOString(),
-            };
-
-        } catch (e) {
-            console.error('[WAQI] City fetch error:', e.message);
+            console.error('[IQAir] Station fetch error:', e.message);
             return null;
         }
     }
@@ -283,104 +196,12 @@ var api = (function () {
     }
 
     /* ============================================================
-       CONVERT WAQI SUB-INDEX → STANDARD POLL FORMAT
-       Fixed: CO and SO2 are sub-indices, not concentrations
-       WAQI iaqi.co.v  = AQI sub-index for CO  (0-500 scale)
-       WAQI iaqi.so2.v = AQI sub-index for SO2 (0-500 scale)
-       ============================================================ */
-    function waqiToStandardPoll(waqiStation) {
-        if (!waqiStation) return null;
-
-        var p = waqiStation.pollutants;
-
-        /*
-         * WAQI sub-indices are AQI values (0-500)
-         * We reverse-engineer approximate concentrations for display
-         * CO: WAQI gives sub-index, reverse to ppm then to µg/m³
-         * SO2: WAQI gives sub-index, reverse to ppb then to µg/m³
-         */
-
-        /* Reverse CO sub-index → ppm → µg/m³ */
-        function aqi_to_co_ugm3(aqi) {
-            var ppm = 0;
-            if (!aqi || aqi <= 0) return 0;
-            if (aqi <=  50) ppm = aqi * 4.4 / 50;
-            else if (aqi <= 100) ppm = 4.5  + (aqi -  51) * (9.4  -  4.5) / 49;
-            else if (aqi <= 150) ppm = 9.5  + (aqi - 101) * (12.4 -  9.5) / 49;
-            else if (aqi <= 200) ppm = 12.5 + (aqi - 151) * (15.4 - 12.5) / 49;
-            else if (aqi <= 300) ppm = 15.5 + (aqi - 201) * (30.4 - 15.5) / 99;
-            else if (aqi <= 400) ppm = 30.5 + (aqi - 301) * (40.4 - 30.5) / 99;
-            else                 ppm = 40.5 + (aqi - 401) * (50.4 - 40.5) / 99;
-            return ppm * CO_FACTOR; /* ppm → µg/m³ */
-        }
-
-        /* Reverse SO2 sub-index → ppb → µg/m³ */
-        function aqi_to_so2_ugm3(aqi) {
-            var ppb = 0;
-            if (!aqi || aqi <= 0) return 0;
-            if (aqi <=  50) ppb = aqi * 35 / 50;
-            else if (aqi <= 100) ppb = 36  + (aqi -  51) * (75  -  36) / 49;
-            else if (aqi <= 150) ppb = 76  + (aqi - 101) * (185 -  76) / 49;
-            else if (aqi <= 200) ppb = 186 + (aqi - 151) * (304 - 186) / 49;
-            else if (aqi <= 300) ppb = 305 + (aqi - 201) * (604 - 305) / 99;
-            else if (aqi <= 400) ppb = 605 + (aqi - 301) * (804 - 605) / 99;
-            else                 ppb = 805 + (aqi - 401) * (1004 - 805) / 99;
-            return ppb * 2.6196; /* ppb → µg/m³ */
-        }
-
-        var no2_ppb = p.no2 ? aqi_to_no2_ppb(p.no2) : 0;
-        var o3_ppb  = p.o3  ? aqi_to_o3_ppb(p.o3)   : 0;
-
-        return {
-            status   : 'success',
-            source   : 'CPCB Ground Station (WAQI)',
-            station  : waqiStation.station,
-
-            /* Approximate concentrations for display only */
-            pm2_5 : p.pm2_5 ? aqi_to_pm25(p.pm2_5)     : 0,
-            pm10  : p.pm10  ? aqi_to_pm10(p.pm10)       : 0,
-            no2   : no2_ppb * 1.88,                        /* ppb → µg/m³ */
-            o3    : o3_ppb  * 1.9632,                      /* ppb → µg/m³ */
-            co    : p.co    ? aqi_to_co_ugm3(p.co)      : 0, /* Fixed */
-            so2   : p.so2   ? aqi_to_so2_ugm3(p.so2)   : 0, /* Fixed */
-            nh3   : 0,
-
-            /* CPCB AQI sub-indices - for display in breakdown */
-            sub_indices : {
-                pm25 : p.pm2_5 || 0,
-                pm10 : p.pm10  || 0,
-                no2  : p.no2   || 0,
-                o3   : p.o3    || 0,
-                co   : p.co    || 0,
-                so2  : p.so2   || 0,
-            },
-
-            /* Official CPCB AQI - use this directly */
-            official_aqi : waqiStation.official_aqi,
-            use_official : true,
-
-            /* Extra weather from WAQI */
-            waqi_temp     : p.temp     || null,
-            waqi_humidity : p.humidity || null,
-            waqi_wind     : p.wind     || null,
-            attributions  : waqiStation.attributions || [],
-            timestamp     : waqiStation.timestamp,
-        };
-    }
-
-    /* ============================================================
        FETCH ALL - Main entry point
-       Fixed: handles 'error' source, fixed dsEl variable scope
        ============================================================ */
     async function fetchAll(lat, lon) {
-
         console.group('%c🔑 AirWatch API Status', 'color:#ff9800;font-weight:bold');
-        console.log('OWM Key   :', keyOk()
-            ? '✅ ' + OWM_KEY.substring(0, 8) + '...'
-            : '❌ MISSING');
-        console.log('WAQI Token:', waqiOk()
-            ? '✅ ' + WAQI_TOKEN.substring(0, 8) + '...'
-            : '❌ MISSING');
+        console.log('OWM Key   :', keyOk() ? '✅ ' + OWM_KEY.substring(0, 8) + '...' : '❌ MISSING');
+        console.log('IQAir Key :', iqairOk() ? '✅ ' + IQAIR_KEY.substring(0, 8) + '...' : '❌ MISSING');
         console.groupEnd();
 
         if (!keyOk()) {
@@ -388,109 +209,51 @@ var api = (function () {
             return { source: 'nokey' };
         }
 
-        /* ── Step 1: Try WAQI for CPCB ground data ── */
-        var waqiStation = null;
-        var waqiPoll    = null;
-
-        if (waqiOk()) {
-            console.log('%c[API] 🌍 Trying WAQI (CPCB ground)...',
-                'color:#2dd4a0;font-weight:bold');
-
-            waqiStation = await fetchWAQI_NearestStation(lat, lon);
-
-            if (waqiStation) {
-                waqiPoll    = waqiToStandardPoll(waqiStation);
-                DATA_SOURCE = 'CPCB Ground Station (WAQI)';
-                console.log(
-                    '%c✅ CPCB Data Loaded! Official AQI: '
-                    + waqiStation.official_aqi
-                    + ' | Station: ' + waqiStation.station,
-                    'color:#2dd4a0;font-size:14px;font-weight:bold'
-                );
-            } else {
-                console.warn('[WAQI] No valid station found - using OWM');
-            }
-        }
-
-        /* ── Step 2: Fetch OWM in parallel ── */
+        /* ── Step 1: Fetch IQAir (Real-time AQI) & OWM in parallel ── */
+        var iqairPromise = iqairOk() ? fetchIQAir_NearestStation(lat, lon) : Promise.resolve(null);
+        
         var results = await Promise.allSettled([
             fetchPollution(lat, lon),
             fetchWeather(lat, lon),
             fetchForecast(lat, lon),
+            iqairPromise
         ]);
 
-        var owmPoll = results[0].status === 'fulfilled'
-            ? results[0].value : null;
-        var w = results[1].status === 'fulfilled'
-            ? results[1].value : null;
-        var f = results[2].status === 'fulfilled'
-            ? results[2].value : null;
+        var owmPoll = results[0].status === 'fulfilled' ? results[0].value : null;
+        var w = results[1].status === 'fulfilled' ? results[1].value : null;
+        var f = results[2].status === 'fulfilled' ? results[2].value : null;
+        var iqairStation = results[3].status === 'fulfilled' ? results[3].value : null;
 
         /* Check OWM auth errors */
         if (results[0].status === 'rejected') {
             var err = results[0].reason.message;
             console.error('[OWM] Pollution failed:', err);
-            if ((err.includes('401') || err.includes('Invalid'))
-                && !waqiPoll) {
+            if ((err.includes('401') || err.includes('Invalid')) && !iqairStation) {
                 return { source: 'badkey' };
             }
         }
 
-        /* ── Step 3: Accuracy comparison log ── */
-        if (waqiPoll && owmPoll && owmPoll.list) {
-            var owmComp = owmPoll.list[0].components;
-            console.group('%c📊 ACCURACY COMPARISON',
-                'color:#00b4ff;font-weight:bold');
-            console.log('Source         | WAQI (CPCB)  | OWM (Satellite)');
-            console.log('Official AQI   | '
-                + waqiStation.official_aqi
-                + '           | Calculated');
-            console.log('PM2.5 Sub-idx  | '
-                + (waqiStation.pollutants.pm2_5 || 'N/A')
-                + '   | ' + owmComp.pm2_5.toFixed(1) + ' µg/m³');
-            console.log('PM10  Sub-idx  | '
-                + (waqiStation.pollutants.pm10  || 'N/A')
-                + '   | ' + owmComp.pm10.toFixed(1)  + ' µg/m³');
-            console.log('%c✅ Using CPCB Ground Data (Most Accurate)',
-                'color:#2dd4a0;font-weight:bold');
-            console.groupEnd();
-        }
-
-        /* ── Step 4: Build final poll object ── */
-        var finalPoll;
-
-        /* Fixed: single dsEl variable before if/else */
+        /* ── Step 2: Build final poll object ── */
+        var finalPoll = owmPoll;
         var dsEl = document.getElementById('dataSource');
 
-        if (waqiPoll) {
-            finalPoll = {
-                list : [{
-                    components : {
-                        pm2_5 : waqiPoll.pm2_5,
-                        pm10  : waqiPoll.pm10,
-                        no2   : waqiPoll.no2,
-                        o3    : waqiPoll.o3,
-                        co    : waqiPoll.co,
-                        so2   : waqiPoll.so2,
-                        nh3   : waqiPoll.nh3 || 0,
-                    },
-                }],
-                source          : 'WAQI_CPCB',
-                official_aqi    : waqiStation.official_aqi,
-                waqi_station    : waqiStation.station,
-                waqi_subindices : waqiStation.pollutants,
-                use_official    : true,
-            };
-
-            if (dsEl) dsEl.textContent = 'CPCB Ground Station (WAQI)';
-
+        if (iqairStation && finalPoll && finalPoll.list && finalPoll.list.length > 0) {
+            DATA_SOURCE = 'IQAir (AirVisual)';
+            finalPoll.source = 'IQAir';
+            finalPoll.official_aqi = iqairStation.official_aqi;
+            finalPoll.waqi_station = iqairStation.station;
+            finalPoll.use_official = true;
+            if (dsEl) dsEl.textContent = 'IQAir (AirVisual) + OWM';
+            
+            console.log(
+                '%c✅ IQAir Data Loaded! Official AQI: ' + iqairStation.official_aqi + ' | Station: ' + iqairStation.station,
+                'color:#2dd4a0;font-size:14px;font-weight:bold'
+            );
         } else {
-            finalPoll   = owmPoll;
             DATA_SOURCE = 'OpenWeatherMap (Satellite)';
             if (dsEl) dsEl.textContent = 'OpenWeatherMap (Satellite)';
         }
 
-        /* Fixed: handle case where everything failed */
         if (!finalPoll && !w) {
             console.error('[API] All requests failed - switching to demo');
             return { source: 'error', message: 'All requests failed' };
@@ -501,9 +264,9 @@ var api = (function () {
             p              : finalPoll,
             w              : w,
             f              : f,
-            waqi_available : !!waqiPoll,
-            waqi_official  : waqiStation ? waqiStation.official_aqi : null,
-            waqi_station   : waqiStation ? waqiStation.station       : null,
+            waqi_available : !!iqairStation,
+            waqi_official  : iqairStation ? iqairStation.official_aqi : null,
+            waqi_station   : iqairStation ? iqairStation.station : null,
             data_source    : DATA_SOURCE,
         };
     }
@@ -606,43 +369,13 @@ var api = (function () {
         return null;
     }
 
-    /* ============================================================
-       LOAD INDIAN CITIES
-       Fixed: uses fetchT with timeout instead of plain fetch
-       ============================================================ */
-    async function loadIndianCities() {
-        if (INDIA_CITIES_LOADED) return;
-        try {
-            var response = await fetchT('data/indian-cities.json', 5);
-            if (response.ok) {
-                var data = await safeJson(response);
-                if (data && data.cities && Array.isArray(data.cities)) {
-                    INDIA_CITIES = data.cities.map(function (name) {
-                        return String(name).toLowerCase();
-                    });
-                    INDIA_CITIES_LOADED = true;
-                    console.log('[API] Indian cities loaded:',
-                        INDIA_CITIES.length);
-                }
-            }
-        } catch (e) {
-            console.warn('[API] Indian cities load failed:', e.message);
-        }
-    }
-
-    /* ============================================================
-       SEARCH CITIES
-       Fixed: safe JSON parse, proper error handling
-       ============================================================ */
     async function searchCities(query) {
         if (!query || query.trim().length < 2) return [];
-        if (!INDIA_CITIES_LOADED) await loadIndianCities();
 
         try {
             var url = URL_GEO
-                + '?q='     + encodeURIComponent(query.trim())
-                + '&limit=15'
-                + '&appid=' + OWM_KEY;
+                + '?q=' + encodeURIComponent(query.trim())
+                + '&format=json&limit=12&addressdetails=1';
 
             var res = await fetchT(url, 8);
             if (!res.ok) return [];
@@ -650,35 +383,27 @@ var api = (function () {
             var data = await safeJson(res);
             if (!data || !Array.isArray(data) || !data.length) return [];
 
-            var processed = data.map(function (c) {
-                var isIndian = c.country === 'IN'
-                    || (INDIA_CITIES
-                        && INDIA_CITIES.indexOf(
-                            String(c.name).toLowerCase()) >= 0);
+            return data.map(function (c) {
+                var addr = c.address || {};
+                var countryCode = (addr.country_code || '').toLowerCase();
+                
+                // Extract best name
+                var name = addr.city || addr.town || addr.village || addr.suburb || addr.hamlet || c.display_name.split(',')[0].trim();
+                
                 return {
-                    name     : c.name     || '',
-                    display  : c.name
-                        + (c.state   ? ', ' + c.state   : '')
-                        + (c.country ? ', ' + c.country : ''),
-                    country  : c.country  || '',
-                    state    : c.state    || '',
-                    lat      : c.lat,
-                    lon      : c.lon,
-                    isIndian : isIndian,
+                    name         : name,
+                    display      : c.display_name,
+                    country      : addr.country || '',
+                    country_code : countryCode,
+                    state        : addr.state || '',
+                    lat          : parseFloat(c.lat),
+                    lon          : parseFloat(c.lon),
+                    isIndian     : countryCode === 'in',
                 };
             });
 
-            var indian = processed
-                .filter(function (c) { return  c.isIndian; })
-                .slice(0, 8);
-            var other  = processed
-                .filter(function (c) { return !c.isIndian; })
-                .slice(0, 8);
-
-            return indian.concat(other);
-
         } catch (e) {
-            console.warn('[API] searchCities error:', e.message);
+            console.error('[API] searchCities error:', e.message);
             return [];
         }
     }
