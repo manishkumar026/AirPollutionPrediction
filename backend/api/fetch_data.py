@@ -6,11 +6,13 @@ import requests
 from datetime import datetime
 from api.config import (
     OPENWEATHER_API_KEY,
+    IQAIR_API_KEY,
     WAQI_API_TOKEN,
     OPENWEATHER_POLLUTION_URL,
     OPENWEATHER_FORECAST_URL,
     OPENWEATHER_WEATHER_URL,
     OPENWEATHER_GEOCODING_URL,
+    IQAIR_URL,
     WAQI_URL,
     DEFAULT_LAT,
     DEFAULT_LON,
@@ -23,6 +25,7 @@ class PollutionDataFetcher:
 
     def __init__(self):
         self.api_key    = OPENWEATHER_API_KEY
+        self.iqair_key  = IQAIR_API_KEY
         self.waqi_token = WAQI_API_TOKEN
         self.session    = requests.Session()
 
@@ -294,12 +297,60 @@ class PollutionDataFetcher:
         return owm_data
 
     # --------------------------------------------------
-    # GET ALL DATA
+    # GET IQAIR DATA (AirVisual)
+    # --------------------------------------------------
+    def get_iqair_data(self, lat, lon):
+        if not self.iqair_key or len(self.iqair_key) < 10:
+            return None
+        try:
+            url = f"{IQAIR_URL}?lat={lat}&lon={lon}&key={self.iqair_key}"
+            resp = self.session.get(url, timeout=10)
+            data = resp.json()
+            if data.get("status") == "success":
+                return {
+                    "official_aqi": data["data"]["current"]["pollution"]["aqius"],
+                    "station": data["data"]["city"],
+                    "source": "IQAir"
+                }
+        except Exception as e:
+            print(f"[IQAir] Error: {e}")
+        return None
+
+    # --------------------------------------------------
+    # GET ALL DATA (Combined)
     # --------------------------------------------------
     def get_all_data(self, lat=DEFAULT_LAT, lon=DEFAULT_LON):
+        p = self.get_current_pollution(lat, lon)
+        f = self.get_pollution_forecast(lat, lon)
+        w = self.get_weather(lat, lon)
+        
+        # Try official sources
+        waqi = self.get_waqi_aqi(lat, lon)
+        iq = self.get_iqair_data(lat, lon)
+        
+        # Priority 1: WAQI (Official CPCB for India)
+        if waqi.get("status") == "success":
+            p["official_aqi"] = waqi["aqi"]
+            p["waqi_station"] = waqi["city"]
+            p["source"] = "CPCB (Official)"
+            p["use_official"] = True
+            for k in ["pm2_5", "pm10", "no2", "o3", "so2", "co"]:
+                if waqi.get(k) is not None:
+                    p[k] = waqi[k]
+
+        # Priority 2: IQAir (Global Official)
+        elif iq:
+            p["official_aqi"] = iq["official_aqi"]
+            p["waqi_station"] = iq["station"]
+            p["source"] = "IQAir (Official)"
+            p["use_official"] = True
+
         return {
-            "pollution":  self.get_current_pollution_enhanced(lat, lon),
-            "weather":    self.get_weather_data(lat, lon),
-            "forecast":   self.get_pollution_forecast(lat, lon, 24),
-            "fetched_at": datetime.now().isoformat(),
+            "status": "success",
+            "pollution": p,
+            "forecast": f,
+            "weather": w,
+            "waqi": waqi,
+            "iq": iq,
+            "source": "backend"
         }

@@ -2,17 +2,21 @@
 # CONFIGURATION FILE
 # ================================================
 
-# GET FREE API KEY FROM: https://openweathermap.org/api
+# OPENWEATHER API KEY
 OPENWEATHER_API_KEY = "1cc153b8da9c132a0ede08d220b59a60"
 
-# WAQI TOKEN (optional - can leave as empty string)
-WAQI_API_TOKEN = "c12943ab88ad31947b8aaf9568a9633988c61ce7"
+# IQAIR API KEY (AirVisual)
+IQAIR_API_KEY = "27636e29-836f-490f-bc7f-01b3871d8b8e"
+
+# WAQI TOKEN (optional)
+WAQI_API_TOKEN = ""
 
 # API URLS
 OPENWEATHER_POLLUTION_URL = "http://api.openweathermap.org/data/2.5/air_pollution"
 OPENWEATHER_FORECAST_URL  = "http://api.openweathermap.org/data/2.5/air_pollution/forecast"
-OPENWEATHER_WEATHER_URL   = "http://api.openweathermap.org/data/2.5/weather"
-OPENWEATHER_GEOCODING_URL = "http://api.openweathermap.org/geo/1.0/direct"
+OPENWEATHER_WEATHER_URL   = "https://api.openweathermap.org/data/2.5/weather"
+OPENWEATHER_GEOCODING_URL = "https://api.openweathermap.org/geo/1.0/direct"
+IQAIR_URL                 = "https://api.airvisual.com/v2/nearest_city"
 WAQI_URL                  = "https://api.waqi.info/feed"
 
 # DEFAULT LOCATION - New Delhi
@@ -23,6 +27,9 @@ DEFAULT_LON = 77.2090
 DEBUG = True
 PORT  = 5000
 HOST  = "0.0.0.0"
+
+# MONGODB SETTINGS (Change this to your local or Atlas URI)
+MONGO_URI = "mongodb://localhost:27017/airwatch_db"
 
 # AQI CATEGORIES
 AQI_CATEGORIES = {

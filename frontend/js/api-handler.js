@@ -1,18 +1,4 @@
-/* ============================================================
-   API-HANDLER.JS - AirWatch Pro - COMPLETE FIXED VERSION
-   FIXES APPLIED:
-   1.  o3ToAQI - Full EPA scale 0-500 (was capped at 300)
-   2.  coToAQI - Correct constant 1145.45 (was 1150.0)
-   3.  predict - Deterministic model outputs (removed Math.random)
-   4.  waqiToStandardPoll - Fixed CO/SO2 conversion (sub-index not mg)
-   5.  fetchWAQI_NearestStation - Handles WAQI "-" AQI value
-   6.  searchCities - Safe JSON parse with try/catch
-   7.  loadIndianCities - Uses fetchT with timeout
-   8.  dsEl variable scope - Single declaration before if/else
-   9.  aqi_to_o3_ppb - Complete reverse range added
-   10. fetchAll - Handles 'error' source properly
-   11. aqi_to_no2/o3 reverse - High ranges added
-   ============================================================ */
+
 
 'use strict';
 
@@ -20,23 +6,23 @@ var api = (function () {
 
     /* ╔══════════════════════════════════════════════════════════╗
        ║                   API KEYS                              ║
-       ║  To change: just replace the string values below       ║
+       ║    ║
        ╚══════════════════════════════════════════════════════════╝ */
 
     /* ── OpenWeatherMap API Key ──────────────────────────────── */
     var OWM_KEY = '1cc153b8da9c132a0ede08d220b59a60';
 
     /* ── IQAir Token (Real-time AQI) ────────────────────────── */
-    var IQAIR_KEY = '27636e29-836f-490f-bc7f-01b3871d8b8e';
+    var IQAIR_KEY = '27636e29836f490fbc7f01b3871d8b8e';
 
     /* ── OWM Endpoints ──────────────────────────────────────── */
-    var URL_AIR      = 'https://api.openweathermap.org/data/2.5/air_pollution';
+    var URL_AIR = 'https://api.openweathermap.org/data/2.5/air_pollution';
     var URL_FORECAST = 'https://api.openweathermap.org/data/2.5/air_pollution/forecast';
-    var URL_WEATHER  = 'https://api.openweathermap.org/data/2.5/weather';
+    var URL_WEATHER = 'https://api.openweathermap.org/data/2.5/weather';
 
     /* ── IQAir Endpoint ─────────────────────────────────────── */
     var URL_IQAIR = 'https://api.airvisual.com/v2/nearest_city';
-    
+
     /* ── Nominatim Endpoint (Search) ────────────────────────── */
     var URL_GEO = 'https://nominatim.openstreetmap.org/search';
 
@@ -58,7 +44,7 @@ var api = (function () {
     function keyOk() {
         return typeof OWM_KEY === 'string'
             && OWM_KEY.trim().length >= 20
-            && OWM_KEY !== 'YOUR_OWM_KEY_HERE';
+            && OWM_KEY !== '1cc153b8da9c132a0ede08d220b59a6';
     }
 
     /* ============================================================
@@ -67,7 +53,7 @@ var api = (function () {
     function fetchT(url, sec) {
         sec = sec || 10;
         return new Promise(function (resolve, reject) {
-            var done  = false;
+            var done = false;
             var timer = setTimeout(function () {
                 if (!done) {
                     done = true;
@@ -117,7 +103,7 @@ var api = (function () {
         console.log('%c[IQAir] Fetching real-time AQI...', 'color:#2dd4a0');
 
         try {
-            var res  = await fetchT(url, 12);
+            var res = await fetchT(url, 12);
             var data = await safeJson(res);
 
             if (!data || data.status !== 'success') {
@@ -152,9 +138,9 @@ var api = (function () {
        ============================================================ */
     function aqi_to_pm25(aqi) {
         if (!aqi || aqi <= 0) return 0;
-        if (aqi <=  50) return aqi * 9.0 / 50;
-        if (aqi <= 100) return 9.1  + (aqi -  51) * (35.4  -  9.1) / 49;
-        if (aqi <= 150) return 35.5 + (aqi - 101) * (55.4  - 35.5) / 49;
+        if (aqi <= 50) return aqi * 9.0 / 50;
+        if (aqi <= 100) return 9.1 + (aqi - 51) * (35.4 - 9.1) / 49;
+        if (aqi <= 150) return 35.5 + (aqi - 101) * (55.4 - 35.5) / 49;
         if (aqi <= 200) return 55.5 + (aqi - 151) * (125.4 - 55.5) / 49;
         if (aqi <= 300) return 125.5 + (aqi - 201) * (225.4 - 125.5) / 99;
         if (aqi <= 400) return 225.5 + (aqi - 301) * (325.4 - 225.5) / 99;
@@ -163,8 +149,8 @@ var api = (function () {
 
     function aqi_to_pm10(aqi) {
         if (!aqi || aqi <= 0) return 0;
-        if (aqi <=  50) return aqi * 54 / 50;
-        if (aqi <= 100) return 55  + (aqi -  51) * (154 -  55) / 49;
+        if (aqi <= 50) return aqi * 54 / 50;
+        if (aqi <= 100) return 55 + (aqi - 51) * (154 - 55) / 49;
         if (aqi <= 150) return 155 + (aqi - 101) * (254 - 155) / 49;
         if (aqi <= 200) return 255 + (aqi - 151) * (354 - 255) / 49;
         if (aqi <= 300) return 355 + (aqi - 201) * (424 - 355) / 99;
@@ -174,10 +160,10 @@ var api = (function () {
 
     function aqi_to_no2_ppb(aqi) {
         if (!aqi || aqi <= 0) return 0;
-        if (aqi <=  50) return aqi * 53 / 50;
-        if (aqi <= 100) return 54  + (aqi -  51) * (100  -  54) / 49;
-        if (aqi <= 150) return 101 + (aqi - 101) * (360  - 101) / 49;
-        if (aqi <= 200) return 361 + (aqi - 151) * (649  - 361) / 49;
+        if (aqi <= 50) return aqi * 53 / 50;
+        if (aqi <= 100) return 54 + (aqi - 51) * (100 - 54) / 49;
+        if (aqi <= 150) return 101 + (aqi - 101) * (360 - 101) / 49;
+        if (aqi <= 200) return 361 + (aqi - 151) * (649 - 361) / 49;
         if (aqi <= 300) return 650 + (aqi - 201) * (1249 - 650) / 99;
         if (aqi <= 400) return 1250 + (aqi - 301) * (1649 - 1250) / 99;
         return 1650 + (aqi - 401) * (2049 - 1650) / 99;
@@ -186,10 +172,10 @@ var api = (function () {
     /* Fixed: complete range including AQI 201-500 */
     function aqi_to_o3_ppb(aqi) {
         if (!aqi || aqi <= 0) return 0;
-        if (aqi <=  50) return aqi * 54 / 50;
-        if (aqi <= 100) return 55 + (aqi -  51) * (70  -  55) / 49;
-        if (aqi <= 150) return 71 + (aqi - 101) * (85  -  71) / 49;
-        if (aqi <= 200) return 86 + (aqi - 151) * (105 -  86) / 49;
+        if (aqi <= 50) return aqi * 54 / 50;
+        if (aqi <= 100) return 55 + (aqi - 51) * (70 - 55) / 49;
+        if (aqi <= 150) return 71 + (aqi - 101) * (85 - 71) / 49;
+        if (aqi <= 200) return 86 + (aqi - 151) * (105 - 86) / 49;
         if (aqi <= 300) return 106 + (aqi - 201) * (200 - 106) / 99;
         if (aqi <= 400) return 201 + (aqi - 301) * (404 - 201) / 99;
         return 405 + (aqi - 401) * (604 - 405) / 99;
@@ -199,6 +185,22 @@ var api = (function () {
        FETCH ALL - Main entry point
        ============================================================ */
     async function fetchAll(lat, lon) {
+        // --- STEP 0: TRY BACKEND FIRST (MOST RELIABLE) ---
+        try {
+            const response = await fetch(`/api/dashboard-data?lat=${lat}&lon=${lon}`);
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                console.log('%c[API] Backend Data Loaded Successfully', 'color:#2dd4a0;font-weight:bold');
+                return {
+                    source: 'backend',
+                    data: data
+                };
+            }
+        } catch (e) {
+            console.warn('[API] Backend fetch failed, falling back to direct API:', e.message);
+        }
+
         console.group('%c🔑 AirWatch API Status', 'color:#ff9800;font-weight:bold');
         console.log('OWM Key   :', keyOk() ? '✅ ' + OWM_KEY.substring(0, 8) + '...' : '❌ MISSING');
         console.log('IQAir Key :', iqairOk() ? '✅ ' + IQAIR_KEY.substring(0, 8) + '...' : '❌ MISSING');
@@ -211,7 +213,7 @@ var api = (function () {
 
         /* ── Step 1: Fetch IQAir (Real-time AQI) & OWM in parallel ── */
         var iqairPromise = iqairOk() ? fetchIQAir_NearestStation(lat, lon) : Promise.resolve(null);
-        
+
         var results = await Promise.allSettled([
             fetchPollution(lat, lon),
             fetchWeather(lat, lon),
@@ -241,7 +243,7 @@ var api = (function () {
         if (iqairStation) {
             DATA_SOURCE = 'IQAir (AirVisual)';
             if (dsEl) dsEl.textContent = 'IQAir (AirVisual) Official';
-            
+
             if (!finalPoll) {
                 // Create a dummy poll object so the UI doesn't crash
                 finalPoll = {
@@ -252,7 +254,7 @@ var api = (function () {
                     }]
                 };
             }
-            
+
             finalPoll.source = 'IQAir';
             finalPoll.official_aqi = iqairStation.official_aqi;
             finalPoll.waqi_station = iqairStation.station;
@@ -270,14 +272,14 @@ var api = (function () {
         }
 
         return {
-            source         : 'direct',
-            p              : finalPoll,
-            w              : w,
-            f              : f,
-            waqi_available : !!iqairStation,
-            waqi_official  : iqairStation ? iqairStation.official_aqi : null,
-            waqi_station   : iqairStation ? iqairStation.station : null,
-            data_source    : DATA_SOURCE,
+            source: 'direct',
+            p: finalPoll,
+            w: w,
+            f: f,
+            waqi_available: !!iqairStation,
+            waqi_official: iqairStation ? iqairStation.official_aqi : null,
+            waqi_station: iqairStation ? iqairStation.station : null,
+            data_source: DATA_SOURCE,
         };
     }
 
@@ -286,15 +288,15 @@ var api = (function () {
        ============================================================ */
     async function fetchPollution(lat, lon) {
         var url = URL_AIR
-            + '?lat='   + lat
-            + '&lon='   + lon
+            + '?lat=' + lat
+            + '&lon=' + lon
             + '&appid=' + OWM_KEY;
 
         var res = await fetchT(url, 10);
         if (res.status === 401) throw new Error('Invalid API key (401)');
         if (res.status === 429) throw new Error('Rate limit exceeded (429)');
         if (res.status === 404) throw new Error('Not found (404)');
-        if (!res.ok)            throw new Error('HTTP ' + res.status);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
 
         var data = await safeJson(res);
         if (!data) throw new Error('Invalid JSON from OWM pollution');
@@ -306,15 +308,15 @@ var api = (function () {
        ============================================================ */
     async function fetchWeather(lat, lon) {
         var url = URL_WEATHER
-            + '?lat='   + lat
-            + '&lon='   + lon
+            + '?lat=' + lat
+            + '&lon=' + lon
             + '&units=metric'
             + '&appid=' + OWM_KEY;
 
         var res = await fetchT(url, 10);
         if (res.status === 401) throw new Error('Invalid API key (401)');
         if (res.status === 429) throw new Error('Rate limit exceeded (429)');
-        if (!res.ok)            throw new Error('HTTP ' + res.status);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
 
         var data = await safeJson(res);
         if (!data) throw new Error('Invalid JSON from OWM weather');
@@ -326,8 +328,8 @@ var api = (function () {
        ============================================================ */
     async function fetchForecast(lat, lon) {
         var url = URL_FORECAST
-            + '?lat='   + lat
-            + '&lon='   + lon
+            + '?lat=' + lat
+            + '&lon=' + lon
             + '&appid=' + OWM_KEY;
 
         var res = await fetchT(url, 10);
@@ -382,19 +384,19 @@ var api = (function () {
             return data.map(function (c) {
                 var addr = c.address || {};
                 var countryCode = (addr.country_code || '').toLowerCase();
-                
+
                 // Extract best name
                 var name = addr.city || addr.town || addr.village || addr.suburb || addr.hamlet || c.display_name.split(',')[0].trim();
-                
+
                 return {
-                    name         : name,
-                    display      : c.display_name,
-                    country      : addr.country || '',
-                    country_code : countryCode,
-                    state        : addr.state || '',
-                    lat          : parseFloat(c.lat),
-                    lon          : parseFloat(c.lon),
-                    isIndian     : countryCode === 'in',
+                    name: name,
+                    display: c.display_name,
+                    country: addr.country || '',
+                    country_code: countryCode,
+                    state: addr.state || '',
+                    lat: parseFloat(c.lat),
+                    lon: parseFloat(c.lon),
+                    isIndian: countryCode === 'in',
                 };
             });
 
@@ -415,59 +417,59 @@ var api = (function () {
        Fixed: noise is now seeded from input values
        ============================================================ */
     async function predict(inputData) {
-        var pm25 = parseFloat(inputData.prev_pm25)   || 0;
-        var pm10 = parseFloat(inputData.prev_pm10)   || 0;
-        var no2  = parseFloat(inputData.prev_no2)    || 0;
-        var o3   = parseFloat(inputData.prev_o3)     || 0;
-        var co   = parseFloat(inputData.prev_co)     || 800;
-        var so2  = parseFloat(inputData.prev_so2)    || 10;
-        var wind = parseFloat(inputData.wind_speed)  || 5;
-        var hum  = parseFloat(inputData.humidity)    || 60;
+        var pm25 = parseFloat(inputData.prev_pm25) || 0;
+        var pm10 = parseFloat(inputData.prev_pm10) || 0;
+        var no2 = parseFloat(inputData.prev_no2) || 0;
+        var o3 = parseFloat(inputData.prev_o3) || 0;
+        var co = parseFloat(inputData.prev_co) || 800;
+        var so2 = parseFloat(inputData.prev_so2) || 10;
+        var wind = parseFloat(inputData.wind_speed) || 5;
+        var hum = parseFloat(inputData.humidity) || 60;
         var temp = parseFloat(inputData.temperature) || 25;
-        var pres = parseFloat(inputData.pressure)    || 1013;
-        var hour = parseInt(inputData.hour)          || new Date().getHours();
-        var mon  = parseInt(inputData.month)         || new Date().getMonth() + 1;
+        var pres = parseFloat(inputData.pressure) || 1013;
+        var hour = parseInt(inputData.hour) || new Date().getHours();
+        var mon = parseInt(inputData.month) || new Date().getMonth() + 1;
 
         /* Meteorological adjustment factors */
-        var windFactor   = Math.max(0.35, 1 - (wind * 0.04));
-        var humFactor    = hum > 80 ? 1.35
-                        : hum > 60 ? 1.15
-                        : hum > 40 ? 1.05 : 1.0;
-        var tempFactor   = temp < 5  ? 1.30
-                        : temp < 15  ? 1.15
-                        : temp > 38  ? 1.12 : 1.0;
-        var presFactor   = pres > 1020 ? 1.12
-                        : pres < 1000  ? 0.90 : 1.0;
+        var windFactor = Math.max(0.35, 1 - (wind * 0.04));
+        var humFactor = hum > 80 ? 1.35
+            : hum > 60 ? 1.15
+                : hum > 40 ? 1.05 : 1.0;
+        var tempFactor = temp < 5 ? 1.30
+            : temp < 15 ? 1.15
+                : temp > 38 ? 1.12 : 1.0;
+        var presFactor = pres > 1020 ? 1.12
+            : pres < 1000 ? 0.90 : 1.0;
         var seasonFactor = (mon >= 11 || mon <= 2) ? 1.40
-                        : (mon >= 3  && mon <= 5)  ? 1.10
-                        : (mon >= 6  && mon <= 9)  ? 0.80 : 1.0;
-        var hourFactor   = (hour >= 6  && hour <= 9)  ? 1.35
-                        : (hour >= 17 && hour <= 21)  ? 1.30
-                        : (hour >= 22 || hour <= 5)   ? 0.70
-                        : (hour >= 12 && hour <= 14)  ? 0.90 : 1.0;
+            : (mon >= 3 && mon <= 5) ? 1.10
+                : (mon >= 6 && mon <= 9) ? 0.80 : 1.0;
+        var hourFactor = (hour >= 6 && hour <= 9) ? 1.35
+            : (hour >= 17 && hour <= 21) ? 1.30
+                : (hour >= 22 || hour <= 5) ? 0.70
+                    : (hour >= 12 && hour <= 14) ? 0.90 : 1.0;
 
         var metFactor = windFactor * humFactor * tempFactor
-                      * presFactor * seasonFactor;
+            * presFactor * seasonFactor;
 
         /* Fixed: deterministic adjustments, no random noise */
         var adjPM25 = pm25 * metFactor * hourFactor;
         var adjPM10 = pm10 * metFactor * hourFactor;
-        var adjNO2  = no2  * windFactor * hourFactor * seasonFactor;
-        var adjO3   = o3   * (temp > 25 ? 1.25 : temp > 15 ? 1.10 : 0.85);
-        var adjCO   = co   * windFactor * hourFactor
-                      * (temp < 10 ? 1.20 : 1.0);
-        var adjSO2  = so2  * windFactor * hourFactor;
+        var adjNO2 = no2 * windFactor * hourFactor * seasonFactor;
+        var adjO3 = o3 * (temp > 25 ? 1.25 : temp > 15 ? 1.10 : 0.85);
+        var adjCO = co * windFactor * hourFactor
+            * (temp < 10 ? 1.20 : 1.0);
+        var adjSO2 = so2 * windFactor * hourFactor;
 
         var aqiPM25 = pm25ToAQI(adjPM25);
         var aqiPM10 = pm10ToAQI(adjPM10);
-        var aqiNO2  = no2ToAQI(adjNO2);
-        var aqiO3   = o3ToAQI(adjO3);
-        var aqiCO   = coToAQI(adjCO);
-        var aqiSO2  = so2ToAQI(adjSO2);
+        var aqiNO2 = no2ToAQI(adjNO2);
+        var aqiO3 = o3ToAQI(adjO3);
+        var aqiCO = coToAQI(adjCO);
+        var aqiSO2 = so2ToAQI(adjSO2);
 
-        var allAQIs  = [aqiPM25, aqiPM10, aqiNO2, aqiO3, aqiCO, aqiSO2];
+        var allAQIs = [aqiPM25, aqiPM10, aqiNO2, aqiO3, aqiCO, aqiSO2];
         var finalAQI = Math.max.apply(null, allAQIs);
-        var names    = ['PM2.5', 'PM10', 'NO₂', 'O₃', 'CO', 'SO₂'];
+        var names = ['PM2.5', 'PM10', 'NO₂', 'O₃', 'CO', 'SO₂'];
         var dominant = names[allAQIs.indexOf(finalAQI)];
 
         /* Fixed: deterministic model variation based on factor */
@@ -481,42 +483,42 @@ var api = (function () {
         await new Promise(function (r) { setTimeout(r, 400); });
 
         return {
-            predicted_aqi     : Math.round(finalAQI),
-            category          : cat.label,
-            color             : cat.color,
-            health_advice     : cat.advice,
-            dominant          : dominant,
-            method            : 'EPA Multi-Pollutant + Meteorological',
+            predicted_aqi: Math.round(finalAQI),
+            category: cat.label,
+            color: cat.color,
+            health_advice: cat.advice,
+            dominant: dominant,
+            method: 'EPA Multi-Pollutant + Meteorological',
             /* Fixed: deterministic confidence based on data quality */
-            confidence        : Math.min(98, Math.round(
+            confidence: Math.min(98, Math.round(
                 85 + (pm25 > 0 ? 3 : 0)
-                   + (pm10 > 0 ? 2 : 0)
-                   + (no2  > 0 ? 2 : 0)
-                   + (o3   > 0 ? 2 : 0)
-                   + (co   > 0 ? 2 : 0)
-                   + (so2  > 0 ? 2 : 0)
+                + (pm10 > 0 ? 2 : 0)
+                + (no2 > 0 ? 2 : 0)
+                + (o3 > 0 ? 2 : 0)
+                + (co > 0 ? 2 : 0)
+                + (so2 > 0 ? 2 : 0)
             )) + '%',
-            individual_models : {
+            individual_models: {
                 /* Fixed: each model uses a consistent multiplier */
-                gradient_boosting : mv(finalAQI, 0.97),
-                random_forest     : mv(finalAQI, 1.02),
-                adaboost          : mv(finalAQI, 0.99),
-                ridge             : mv(finalAQI, 1.01),
+                gradient_boosting: mv(finalAQI, 0.97),
+                random_forest: mv(finalAQI, 1.02),
+                adaboost: mv(finalAQI, 0.99),
+                ridge: mv(finalAQI, 1.01),
             },
-            breakdown : {
-                pm25_aqi : aqiPM25,
-                pm10_aqi : aqiPM10,
-                no2_aqi  : aqiNO2,
-                o3_aqi   : aqiO3,
-                co_aqi   : aqiCO,
-                so2_aqi  : aqiSO2,
+            breakdown: {
+                pm25_aqi: aqiPM25,
+                pm10_aqi: aqiPM10,
+                no2_aqi: aqiNO2,
+                o3_aqi: aqiO3,
+                co_aqi: aqiCO,
+                so2_aqi: aqiSO2,
             },
-            factors : {
-                wind     : windFactor.toFixed(2),
-                humidity : humFactor.toFixed(2),
-                temp     : tempFactor.toFixed(2),
-                season   : seasonFactor.toFixed(2),
-                hour     : hourFactor.toFixed(2),
+            factors: {
+                wind: windFactor.toFixed(2),
+                humidity: humFactor.toFixed(2),
+                temp: tempFactor.toFixed(2),
+                season: seasonFactor.toFixed(2),
+                hour: hourFactor.toFixed(2),
             },
         };
     }
@@ -535,10 +537,10 @@ var api = (function () {
 
     function pm25ToAQI(c) {
         c = Math.max(0, Math.round((parseFloat(c) || 0) * 10) / 10);
-        if (c <=   9.0) return ls(c,   0.0,   9.0,   0,  50);
-        if (c <=  35.4) return ls(c,   9.1,  35.4,  51, 100);
-        if (c <=  55.4) return ls(c,  35.5,  55.4, 101, 150);
-        if (c <= 125.4) return ls(c,  55.5, 125.4, 151, 200);
+        if (c <= 9.0) return ls(c, 0.0, 9.0, 0, 50);
+        if (c <= 35.4) return ls(c, 9.1, 35.4, 51, 100);
+        if (c <= 55.4) return ls(c, 35.5, 55.4, 101, 150);
+        if (c <= 125.4) return ls(c, 55.5, 125.4, 151, 200);
         if (c <= 225.4) return ls(c, 125.5, 225.4, 201, 300);
         if (c <= 325.4) return ls(c, 225.5, 325.4, 301, 400);
         if (c <= 500.4) return ls(c, 325.5, 500.4, 401, 500);
@@ -547,8 +549,8 @@ var api = (function () {
 
     function pm10ToAQI(c) {
         c = Math.max(0, Math.floor(parseFloat(c) || 0));
-        if (c <=  54) return ls(c,   0,  54,   0,  50);
-        if (c <= 154) return ls(c,  55, 154,  51, 100);
+        if (c <= 54) return ls(c, 0, 54, 0, 50);
+        if (c <= 154) return ls(c, 55, 154, 51, 100);
         if (c <= 254) return ls(c, 155, 254, 101, 150);
         if (c <= 354) return ls(c, 255, 354, 151, 200);
         if (c <= 424) return ls(c, 355, 424, 201, 300);
@@ -560,11 +562,11 @@ var api = (function () {
     function no2ToAQI(ugm3) {
         var c = Math.max(0,
             Math.floor((parseFloat(ugm3) || 0) / 1.88));
-        if (c <=   53) return ls(c,    0,   53,   0,  50);
-        if (c <=  100) return ls(c,   54,  100,  51, 100);
-        if (c <=  360) return ls(c,  101,  360, 101, 150);
-        if (c <=  649) return ls(c,  361,  649, 151, 200);
-        if (c <= 1249) return ls(c,  650, 1249, 201, 300);
+        if (c <= 53) return ls(c, 0, 53, 0, 50);
+        if (c <= 100) return ls(c, 54, 100, 51, 100);
+        if (c <= 360) return ls(c, 101, 360, 101, 150);
+        if (c <= 649) return ls(c, 361, 649, 151, 200);
+        if (c <= 1249) return ls(c, 650, 1249, 201, 300);
         if (c <= 1649) return ls(c, 1250, 1649, 301, 400);
         if (c <= 2049) return ls(c, 1650, 2049, 401, 500);
         return 500;
@@ -574,10 +576,10 @@ var api = (function () {
     function o3ToAQI(ugm3) {
         var c = Math.max(0,
             Math.floor((parseFloat(ugm3) || 0) / 1.9632));
-        if (c <=  54) return ls(c,   0,  54,   0,  50);
-        if (c <=  70) return ls(c,  55,  70,  51, 100);
-        if (c <=  85) return ls(c,  71,  85, 101, 150);
-        if (c <= 105) return ls(c,  86, 105, 151, 200);
+        if (c <= 54) return ls(c, 0, 54, 0, 50);
+        if (c <= 70) return ls(c, 55, 70, 51, 100);
+        if (c <= 85) return ls(c, 71, 85, 101, 150);
+        if (c <= 105) return ls(c, 86, 105, 151, 200);
         if (c <= 200) return ls(c, 106, 200, 201, 300);
         if (c <= 404) return ls(c, 201, 404, 301, 400);
         if (c <= 604) return ls(c, 405, 604, 401, 500);
@@ -588,9 +590,9 @@ var api = (function () {
     function coToAQI(ugm3) {
         var c = Math.max(0,
             Math.round(((parseFloat(ugm3) || 0) / CO_FACTOR) * 10) / 10);
-        if (c <=  4.4) return ls(c,  0.0,  4.4,   0,  50);
-        if (c <=  9.4) return ls(c,  4.5,  9.4,  51, 100);
-        if (c <= 12.4) return ls(c,  9.5, 12.4, 101, 150);
+        if (c <= 4.4) return ls(c, 0.0, 4.4, 0, 50);
+        if (c <= 9.4) return ls(c, 4.5, 9.4, 51, 100);
+        if (c <= 12.4) return ls(c, 9.5, 12.4, 101, 150);
         if (c <= 15.4) return ls(c, 12.5, 15.4, 151, 200);
         if (c <= 30.4) return ls(c, 15.5, 30.4, 201, 300);
         if (c <= 40.4) return ls(c, 30.5, 40.4, 301, 400);
@@ -601,12 +603,12 @@ var api = (function () {
     function so2ToAQI(ugm3) {
         var c = Math.max(0,
             Math.floor((parseFloat(ugm3) || 0) / 2.6196));
-        if (c <=   35) return ls(c,   0,   35,   0,  50);
-        if (c <=   75) return ls(c,  36,   75,  51, 100);
-        if (c <=  185) return ls(c,  76,  185, 101, 150);
-        if (c <=  304) return ls(c, 186,  304, 151, 200);
-        if (c <=  604) return ls(c, 305,  604, 201, 300);
-        if (c <=  804) return ls(c, 605,  804, 301, 400);
+        if (c <= 35) return ls(c, 0, 35, 0, 50);
+        if (c <= 75) return ls(c, 36, 75, 51, 100);
+        if (c <= 185) return ls(c, 76, 185, 101, 150);
+        if (c <= 304) return ls(c, 186, 304, 151, 200);
+        if (c <= 604) return ls(c, 305, 604, 201, 300);
+        if (c <= 804) return ls(c, 605, 804, 301, 400);
         if (c <= 1004) return ls(c, 805, 1004, 401, 500);
         return 500;
     }
@@ -616,67 +618,67 @@ var api = (function () {
        ============================================================ */
     function getCat(aqi) {
         aqi = parseFloat(aqi) || 0;
-        if (aqi <=  50) return {
-            label : 'Good', color : '#00e400',
-            icon  : 'fas fa-smile',
+        if (aqi <= 50) return {
+            label: 'Good', color: '#00e400',
+            icon: 'fas fa-smile',
             advice: 'Air quality is satisfactory. No health risk.',
         };
         if (aqi <= 100) return {
-            label : 'Moderate', color : '#ffff00',
-            icon  : 'fas fa-meh',
+            label: 'Moderate', color: '#ffff00',
+            icon: 'fas fa-meh',
             advice: 'Acceptable. Unusually sensitive people should '
-                  + 'reduce prolonged outdoor exertion.',
+                + 'reduce prolonged outdoor exertion.',
         };
         if (aqi <= 150) return {
-            label : 'Unhealthy for Sensitive Groups', color : '#ff7e00',
-            icon  : 'fas fa-frown',
+            label: 'Unhealthy for Sensitive Groups', color: '#ff7e00',
+            icon: 'fas fa-frown',
             advice: 'Sensitive groups (children, elderly, respiratory '
-                  + 'patients) reduce outdoor activity.',
+                + 'patients) reduce outdoor activity.',
         };
         if (aqi <= 200) return {
-            label : 'Unhealthy', color : '#ff0000',
-            icon  : 'fas fa-tired',
+            label: 'Unhealthy', color: '#ff0000',
+            icon: 'fas fa-tired',
             advice: 'Everyone may begin to experience health effects. '
-                  + 'Wear mask outdoors.',
+                + 'Wear mask outdoors.',
         };
         if (aqi <= 300) return {
-            label : 'Very Unhealthy', color : '#8f3f97',
-            icon  : 'fas fa-skull',
+            label: 'Very Unhealthy', color: '#8f3f97',
+            icon: 'fas fa-skull',
             advice: 'Health alert: Everyone may experience serious '
-                  + 'effects. Avoid all outdoor activity.',
+                + 'effects. Avoid all outdoor activity.',
         };
         return {
-            label : 'Hazardous', color : '#7e0023',
-            icon  : 'fas fa-biohazard',
+            label: 'Hazardous', color: '#7e0023',
+            icon: 'fas fa-biohazard',
             advice: 'Health emergency! Stay indoors, seal windows/doors. '
-                  + 'Everyone affected.',
+                + 'Everyone affected.',
         };
     }
 
-    function getKey()    { return OWM_KEY;    }
+    function getKey() { return OWM_KEY; }
     function getSource() { return DATA_SOURCE; }
 
     /* ============================================================
        PUBLIC API
        ============================================================ */
     return {
-        fetchAll     : fetchAll,
-        fetchCityAQI : fetchCityAQI,
-        searchCity   : searchCity,
-        searchCities : searchCities,
-        predict      : predict,
-        pm25ToAQI    : pm25ToAQI,
-        pm10ToAQI    : pm10ToAQI,
-        no2ToAQI     : no2ToAQI,
-        o3ToAQI      : o3ToAQI,
-        coToAQI      : coToAQI,
-        so2ToAQI     : so2ToAQI,
-        getCat       : getCat,
-        getKey       : getKey,
-        getSource    : getSource,
-        iqairOk      : iqairOk,
-        keyOk        : keyOk,
-        logSearch    : logSearch,
+        fetchAll: fetchAll,
+        fetchCityAQI: fetchCityAQI,
+        searchCity: searchCity,
+        searchCities: searchCities,
+        predict: predict,
+        pm25ToAQI: pm25ToAQI,
+        pm10ToAQI: pm10ToAQI,
+        no2ToAQI: no2ToAQI,
+        o3ToAQI: o3ToAQI,
+        coToAQI: coToAQI,
+        so2ToAQI: so2ToAQI,
+        getCat: getCat,
+        getKey: getKey,
+        getSource: getSource,
+        iqairOk: iqairOk,
+        keyOk: keyOk,
+        logSearch: logSearch,
     };
 
     async function logSearch(city, lat, lon) {
