@@ -34,7 +34,8 @@ app.config['MONGO_URI'] = MONGO_URI
 CORS(app)
 
 # ---- MONGODB & AUTH ----
-mongo = PyMongo(app)
+app.config['MONGO_URI'] = MONGO_URI
+mongo = PyMongo(app, tls=True, tlsAllowInvalidCertificates=True)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login_page'

@@ -40,15 +40,27 @@ class AQIPredictor:
         self._load_or_train()
 
     def _load_or_train(self):
-        models_path  = os.path.join(self.base, "multi_models.pkl")
+        # Look in both current dir and backend/model dir for Render
+        search_dirs = [
+            os.path.dirname(__file__),
+            os.path.join(os.getcwd(), "backend", "model"),
+            os.path.join(os.getcwd(), "model")
+        ]
+        
+        models_path = None
+        for d in search_dirs:
+            p = os.path.join(d, "multi_models.pkl")
+            if os.path.exists(p):
+                models_path = p
+                self.base = d
+                break
+        
+        if not models_path:
+            print("❌ Error: ML Models not found in any search path!")
+            return
+
         scaler_path  = os.path.join(self.base, "scaler.pkl")
         weights_path = os.path.join(self.base, "weights.pkl")
-
-        if (
-            os.path.exists(models_path)
-            and os.path.exists(scaler_path)
-            and os.path.exists(weights_path)
-        ):
             try:
                 self.models  = joblib.load(models_path)
                 self.scaler  = joblib.load(scaler_path)
