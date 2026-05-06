@@ -333,28 +333,14 @@ var api = (function () {
        ============================================================ */
     async function fetchCityAQI(lat, lon, cityName) {
 
-        if (waqiOk() && cityName) {
-            try {
-                var waqi = await fetchWAQI_ByCity(cityName);
-                if (waqi && waqi.official_aqi > 0) {
-                    var standard = waqiToStandardPoll(waqi);
-                    if (standard) {
-                        return {
-                            pm2_5        : standard.pm2_5,
-                            pm10         : standard.pm10,
-                            no2          : standard.no2,
-                            o3           : standard.o3,
-                            co           : standard.co,
-                            so2          : standard.so2,
-                            official_aqi : waqi.official_aqi,
-                            use_official : true,
-                            source       : 'WAQI_CPCB',
-                        };
-                    }
-                }
-            } catch (e) {
-                console.warn('[WAQI] City AQI failed:', e.message);
+        // Fallback to OWM for comparison cities
+        try {
+            var data = await fetchPollution(lat, lon);
+            if (data && data.list && data.list.length > 0) {
+                return data.list[0].components;
             }
+        } catch (e) {
+            console.warn('[OWM] City AQI failed:', e.message);
         }
 
         try {
@@ -658,7 +644,6 @@ var api = (function () {
     }
 
     function getKey()    { return OWM_KEY;    }
-    function getWAQI()   { return WAQI_TOKEN; }
     function getSource() { return DATA_SOURCE; }
 
     /* ============================================================
@@ -678,10 +663,22 @@ var api = (function () {
         so2ToAQI     : so2ToAQI,
         getCat       : getCat,
         getKey       : getKey,
-        getWAQI      : getWAQI,
         getSource    : getSource,
-        waqiOk       : waqiOk,
+        iqairOk      : iqairOk,
         keyOk        : keyOk,
+        logSearch    : logSearch,
     };
+
+    async function logSearch(city, lat, lon) {
+        try {
+            await fetch('/api/log_search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ city, lat, lon })
+            });
+        } catch (e) {
+            console.warn('[API] Log search failed:', e.message);
+        }
+    }
 
 }());

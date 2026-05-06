@@ -1,110 +1,210 @@
-from flask import Flask, send_from_directory, jsonify, request
+# ================================================
+# FLASK SERVER - MAIN FILE
+# ================================================
+
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-from api.fetch_data import PollutionDataFetcher
-from api.config import PORT, HOST, DEBUG
+from datetime import datetime
+import traceback
+import sys
 import os
 
-app = Flask(
-    __name__,
-    static_folder="../frontend",
-    template_folder="../frontend"
-)
+# Add backend folder to path
+sys.path.insert(0, os.path.dirname(__file__))
+
+from api.config     import DEBUG, HOST, PORT, DEFAULT_LAT, DEFAULT_LON
+from api.fetch_data import PollutionDataFetcher
+from model.predict  import AQIPredictor
+
+# ---- CREATE APP ----
+app       = Flask(__name__)
 CORS(app)
 
-# Initialize data fetcher
-fetcher = PollutionDataFetcher()
+# ---- CREATE INSTANCES ----
+fetcher   = PollutionDataFetcher()
+predictor = AQIPredictor()
 
-# ====== STATIC FILES ======
+
+# ================================================
+# HELPER
+# ================================================
+def err(msg, code=500):
+    return jsonify({"status": "error", "message": msg}), code
+
+
+# ================================================
+# ROUTES
+# ================================================
+
 @app.route("/")
-def index():
-    return send_from_directory("../frontend", "index.html")
+def home():
+    return jsonify({
+        "app":     "Air Pollution Prediction API",
+        "version": "2.0",
+        "status":  "running",
+        "time":    datetime.now().isoformat(),
+    })
 
-@app.route("/js/<path:filename>")
-def js_files(filename):
-    return send_from_directory("../frontend/js", filename)
 
-@app.route("/css/<path:filename>")
-def css_files(filename):
-    return send_from_directory("../frontend/css", filename)
+@app.route("/api/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "time":   datetime.now().isoformat(),
+    })
 
-@app.route("/data/<path:filename>")
-def data_files(filename):
-    return send_from_directory("../frontend/data", filename)
 
-# ====== API ENDPOINTS ======
-@app.route("/api/pollution", methods=["GET"])
-def get_pollution():
-    """Get current pollution data"""
+@app.route("/api/current-pollution")
+def current_pollution():
     try:
-        lat = request.args.get('lat', 28.6139, type=float)
-        lon = request.args.get('lon', 77.2090, type=float)
+        lat  = float(request.args.get("lat", DEFAULT_LAT))
+        lon  = float(request.args.get("lon", DEFAULT_LON))
         data = fetcher.get_current_pollution_enhanced(lat, lon)
         return jsonify(data)
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return err(str(e))
 
-@app.route("/api/forecast", methods=["GET"])
-def get_forecast():
-    """Get pollution forecast"""
+
+@app.route("/api/forecast")
+def forecast():
     try:
-        lat = request.args.get('lat', 28.6139, type=float)
-        lon = request.args.get('lon', 77.2090, type=float)
-        hours = request.args.get('hours', 24, type=int)
-        data = fetcher.get_pollution_forecast(lat, lon, hours)
+        lat   = float(request.args.get("lat",   DEFAULT_LAT))
+        lon   = float(request.args.get("lon",   DEFAULT_LON))
+        hours = int(  request.args.get("hours", 24))
+        data  = fetcher.get_pollution_forecast(lat, lon, hours)
         return jsonify(data)
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return err(str(e))
 
-@app.route("/api/weather", methods=["GET"])
-def get_weather():
-    """Get weather data"""
+
+@app.route("/api/weather")
+def weather():
     try:
-        lat = request.args.get('lat', 28.6139, type=float)
-        lon = request.args.get('lon', 77.2090, type=float)
+        lat  = float(request.args.get("lat", DEFAULT_LAT))
+        lon  = float(request.args.get("lon", DEFAULT_LON))
         data = fetcher.get_weather_data(lat, lon)
         return jsonify(data)
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return err(str(e))
 
-@app.route("/api/all", methods=["GET"])
-def get_all_data():
-    """Get all data (pollution, weather, forecast)"""
-    try:
-        lat = request.args.get('lat', 28.6139, type=float)
-        lon = request.args.get('lon', 77.2090, type=float)
-        data = fetcher.get_all_data(lat, lon)
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
 
-@app.route("/api/geocode", methods=["GET"])
+@app.route("/api/geocode")
 def geocode():
-    """Geocode city name to coordinates"""
     try:
-        city = request.args.get('city', '')
-        if not city:
-            return jsonify({"status": "error", "message": "City name required"}), 400
+        city = request.args.get("city", "Delhi")
         data = fetcher.geocode_city(city)
         return jsonify(data)
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return err(str(e))
 
-@app.route("/api/health", methods=["GET"])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({"status": "ok", "message": "Backend is running"})
 
-# ====== ERROR HANDLERS ======
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({"status": "error", "message": "Endpoint not found"}), 404
+@app.route("/api/dashboard-data")
+def dashboard_data():
+    try:
+        lat = float(request.args.get("lat", DEFAULT_LAT))
+        lon = float(request.args.get("lon", DEFAULT_LON))
 
-@app.errorhandler(500)
-def server_error(e):
-    return jsonify({"status": "error", "message": "Internal server error"}), 500
+        # Fetch live data
+        pollution = fetcher.get_current_pollution_enhanced(lat, lon)
+        weather   = fetcher.get_weather_data(lat, lon)
+        forecast  = fetcher.get_pollution_forecast(lat, lon, 24)
 
-# ====== MAIN ======
+        # Build prediction input
+        pred_input = {
+            "hour":        datetime.now().hour,
+            "month":       datetime.now().month,
+            "day_of_week": datetime.now().weekday(),
+            "temperature": 25,
+            "humidity":    60,
+            "wind_speed":  5,
+            "pressure":    1013,
+            "prev_pm25":   50,
+            "prev_pm10":   80,
+            "prev_no2":    30,
+            "prev_o3":     40,
+            "prev_co":     800,
+        }
+
+        # Update from live pollution data
+        if pollution.get("status") == "success":
+            pred_input["prev_pm25"] = pollution.get("pm2_5", 50)
+            pred_input["prev_pm10"] = pollution.get("pm10",  80)
+            pred_input["prev_no2"]  = pollution.get("no2",   30)
+            pred_input["prev_o3"]   = pollution.get("o3",    40)
+            pred_input["prev_co"]   = pollution.get("co",   800)
+
+        # Update from live weather data
+        if weather.get("status") == "success":
+            pred_input["temperature"] = weather.get("temp",       25)
+            pred_input["humidity"]    = weather.get("humidity",   60)
+            pred_input["wind_speed"]  = weather.get("wind_speed",  5)
+            pred_input["pressure"]    = weather.get("pressure", 1013)
+
+        # Get ML predictions
+        ml_pred     = predictor.predict(pred_input)
+        hourly_pred = predictor.predict_next_hours(pred_input, 12)
+
+        return jsonify({
+            "status":            "success",
+            "pollution":         pollution,
+            "weather":           weather,
+            "forecast":          forecast,
+            "ml_prediction":     ml_pred,
+            "hourly_prediction": hourly_pred,
+            "timestamp":         datetime.now().isoformat(),
+            "location":          {"lat": lat, "lon": lon},
+        })
+
+    except Exception as e:
+        traceback.print_exc()
+        return err(str(e))
+
+
+@app.route("/api/predict", methods=["POST"])
+def predict():
+    try:
+        data   = request.get_json() or {}
+        result = predictor.predict(data)
+        return jsonify(result)
+    except Exception as e:
+        return err(str(e), 400)
+
+
+@app.route("/api/predict-hours", methods=["POST"])
+def predict_hours():
+    try:
+        body  = request.get_json() or {}
+        hours = int(body.get("hours", 12))
+        data  = body.get("data", {})
+        result = predictor.predict_next_hours(data, hours)
+        return jsonify(result)
+    except Exception as e:
+        return err(str(e), 400)
+
+
+@app.route("/api/train-model", methods=["POST"])
+def train_model():
+    try:
+        from model.train_model import ModelTrainer
+        trainer = ModelTrainer()
+        metrics = trainer.train()
+        return jsonify({
+            "status":  "success",
+            "message": "Model trained successfully!",
+            "metrics": metrics,
+        })
+    except Exception as e:
+        return err(str(e))
+
+
+# ================================================
+# RUN SERVER
+# ================================================
 if __name__ == "__main__":
-    print(f"🌍 Starting AirWatch Pro Backend...")
-    print(f"📍 HOST: {HOST} | PORT: {PORT} | DEBUG: {DEBUG}")
-    app.run(host=HOST, port=PORT, debug=DEBUG)
+    print("\n" + "=" * 50)
+    print("  AIR POLLUTION PREDICTION SERVER")
+    print("=" * 50)
+    print(f"  URL : http://localhost:{PORT}")
+    print(f"  Test: http://localhost:{PORT}/api/health")
+    print("=" * 50 + "\n")
+    app.run(debug=DEBUG, host=HOST, port=PORT)

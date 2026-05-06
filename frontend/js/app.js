@@ -58,7 +58,10 @@ function sanitize(str) {
 /* ============================================================
    ON PAGE LOAD
    ============================================================ */
-window.addEventListener('load', function () {
+window.addEventListener('load', async function () {
+    const auth = await checkAuth();
+    if (!auth) return; // checkAuth handles redirect
+
     startClock();
     setTimeout(hideLoader, 2500);
     loadAll();
@@ -71,6 +74,44 @@ window.addEventListener('load', function () {
         'background:#0a0f1e;padding:8px 16px;border-radius:8px'
     );
 });
+
+async function checkAuth() {
+    try {
+        const res = await fetch('/api/user_status');
+        const data = await res.json();
+        if (!data.is_authenticated) {
+            window.location.href = '/login';
+            return false;
+        }
+        
+        // Show user profile
+        const up = document.getElementById('userProfile');
+        if (up) up.style.display = 'block';
+        
+        const un = document.getElementById('usernameLabel');
+        if (un) un.textContent = data.username;
+        
+        if (data.is_admin) {
+            const ab = document.getElementById('adminBadge');
+            const eb = document.getElementById('adminExportBtn');
+            if (ab) ab.style.display = 'block';
+            if (eb) eb.style.display = 'block';
+        }
+        return true;
+    } catch (e) {
+        window.location.href = '/login';
+        return false;
+    }
+}
+
+async function logout() {
+    await fetch('/api/logout');
+    window.location.href = '/login';
+}
+
+function exportLogs() {
+    window.location.href = '/api/admin/logs';
+}
 
 /* ============================================================
    CLOCK - Fixed: clears interval to prevent memory leak
@@ -368,8 +409,8 @@ function useDirect(p, w, f) {
             var comp = p.list[0].components;
             var poll, result;
 
-            /* ─── CASE 1: CPCB Official from WAQI ─── */
-            if (p.source === 'WAQI_CPCB' && p.official_aqi > 0) {
+            /* ─── CASE 1: Official from IQAir or CPCB ─── */
+            if ((p.source === 'WAQI_CPCB' || p.source === 'IQAir') && p.official_aqi > 0) {
 
                 console.log(
                     '%c🎯 USING CPCB OFFICIAL AQI: ' + p.official_aqi
@@ -379,7 +420,7 @@ function useDirect(p, w, f) {
 
                 poll = {
                     status : 'success',
-                    source : 'WAQI_CPCB',
+                    source : p.source,
                     aqi    : parseFloat(p.official_aqi),
                     pm2_5  : comp.pm2_5 || 0,
                     pm10   : comp.pm10  || 0,
@@ -550,6 +591,7 @@ function normalisePoll(poll) {
 
     var isOfficial = (
         poll.source === 'WAQI_CPCB' ||
+        poll.source === 'IQAir' ||
         poll.source === 'WAQI'
     ) && poll.aqi != null && parseFloat(poll.aqi) > 0;
 
@@ -1055,10 +1097,14 @@ async function showAutocomplete(query) {
             item.addEventListener('click', function () {
                 LAT = parseFloat(item.dataset.lat);
                 LON = parseFloat(item.dataset.lon);
+                var cityName = item.dataset.name;
                 var si2 = document.getElementById('citySearch');
-                if (si2) si2.value = item.dataset.name;
+                if (si2) si2.value = cityName;
                 closeAutocomplete();
                 loadAll();
+                
+                // LOG SEARCH
+                api.logSearch(cityName, LAT, LON);
             });
         });
         drop.style.display = 'block';
