@@ -53,17 +53,20 @@ def load_user(user_id):
         return User(user_data)
     return None
 
-# Create default admin if not exists
+# Create default admin if not exists (Safe check)
 with app.app_context():
     try:
-        if not mongo.db.users.find_one({"username": "admin"}):
-            mongo.db.users.insert_one({
-                "username": "admin",
-                "password": generate_password_hash("admin123"),
-                "is_admin": True
-            })
+        if mongo.db is not None:
+            if not mongo.db.users.find_one({"username": "admin"}):
+                mongo.db.users.insert_one({
+                    "username": "admin",
+                    "password": generate_password_hash("admin123"),
+                    "is_admin": True,
+                    "created_at": datetime.now()
+                })
     except Exception as e:
-        print(f"MongoDB Connection Error: {e}")
+        print(f"⚠️ Warning: MongoDB not connected yet. (Error: {e})")
+        print("   Dashboard will work in Demo Mode until MONGO_URI is set in Render.")
 
 # ---- CREATE INSTANCES ----
 fetcher   = PollutionDataFetcher()
