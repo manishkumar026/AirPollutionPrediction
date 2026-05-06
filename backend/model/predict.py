@@ -106,12 +106,15 @@ class AQIPredictor:
             float(input_data.get("prev_so2",    20)),
         ]
 
-        scaled = self.scaler.transform([features])
+        import pandas as pd
+        df = pd.DataFrame([features], columns=self.FEATURES)
+        scaled = self.scaler.transform(df)
 
         # Get prediction from each model
         predictions = {}
+        scaled_df = pd.DataFrame(scaled, columns=self.FEATURES)
         for name, model in self.models.items():
-            pred = model.predict(scaled)[0]
+            pred = model.predict(scaled_df)[0]
             predictions[name] = round(float(pred), 1)
 
         # Weighted ensemble
