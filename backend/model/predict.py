@@ -61,7 +61,12 @@ class AQIPredictor:
             except Exception as e:
                 print(f"Load error: {e}")
 
-        print("Training new multi-model ensemble...")
+        # Never try to train on production/Render (it's too slow)
+        if os.environ.get("RENDER") or not os.environ.get("DEBUG", "True") == "True":
+            print("❌ Error: ML Models not found! Please upload multi_models.pkl to GitHub.")
+            return
+
+        print("Training new multi-model ensemble (Local Debug Mode only)...")
         self._train_new()
 
     def _train_new(self):
