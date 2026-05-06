@@ -234,28 +234,38 @@ var api = (function () {
         }
 
         /* ── Step 2: Build final poll object ── */
-        var finalPoll = owmPoll;
         var dsEl = document.getElementById('dataSource');
+        var finalPoll = owmPoll;
 
-        if (iqairStation && finalPoll && finalPoll.list && finalPoll.list.length > 0) {
+        // If OWM failed but IQAir worked, we can still show IQAir data!
+        if (iqairStation) {
             DATA_SOURCE = 'IQAir (AirVisual)';
+            if (dsEl) dsEl.textContent = 'IQAir (AirVisual) Official';
+            
+            if (!finalPoll) {
+                // Create a dummy poll object so the UI doesn't crash
+                finalPoll = {
+                    list: [{
+                        components: {
+                            pm2_5: 0, pm10: 0, no2: 0, o3: 0, co: 0, so2: 0
+                        }
+                    }]
+                };
+            }
+            
             finalPoll.source = 'IQAir';
             finalPoll.official_aqi = iqairStation.official_aqi;
             finalPoll.waqi_station = iqairStation.station;
             finalPoll.use_official = true;
-            if (dsEl) dsEl.textContent = 'IQAir (AirVisual) + OWM';
-            
-            console.log(
-                '%c✅ IQAir Data Loaded! Official AQI: ' + iqairStation.official_aqi + ' | Station: ' + iqairStation.station,
-                'color:#2dd4a0;font-size:14px;font-weight:bold'
-            );
-        } else {
+
+            console.log('%c✅ Using IQAir Data', 'color:#2dd4a0;font-weight:bold');
+        } else if (finalPoll) {
             DATA_SOURCE = 'OpenWeatherMap (Satellite)';
             if (dsEl) dsEl.textContent = 'OpenWeatherMap (Satellite)';
         }
 
         if (!finalPoll && !w) {
-            console.error('[API] All requests failed - switching to demo');
+            console.error('[API] ❌ All APIs failed (OWM & IQAir)');
             return { source: 'error', message: 'All requests failed' };
         }
 
