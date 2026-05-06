@@ -28,8 +28,9 @@ DEBUG = True
 PORT  = 5000
 HOST  = "0.0.0.0"
 
-# MONGODB SETTINGS (Change this to your local or Atlas URI)
-MONGO_URI = "mongodb://localhost:27017/airwatch_db"
+# MONGODB SETTINGS (Detects Render Environment Variable)
+import os
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/airwatch_db")
 
 # AQI CATEGORIES
 AQI_CATEGORIES = {
