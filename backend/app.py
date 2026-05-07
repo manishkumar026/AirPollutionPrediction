@@ -1,18 +1,20 @@
 # ================================================
-# FLASK SERVER - AIRWATCH PRO (SQLITE VERSION)
+# FLASK SERVER - AIRWATCH PRO (MONGODB VERSION)
 # ================================================
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect, url_for, make_response
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
+from flask_pymongo import PyMongo
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from bson.objectid import ObjectId
 from datetime import datetime
 import traceback
 import sys
 import os
 import io
 import csv
+import certifi
 
 # Add backend folder to path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -28,30 +30,31 @@ app = Flask(
     template_folder="../frontend"
 )
 app.config['SECRET_KEY'] = 'airwatch-pro-secret-key-123'
-
 CORS(app)
 
-# ---- DATABASE CONFIG (SQLite) ----
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///airwatch.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
+# ---- DATABASE CONFIG (MongoDB) ----
+mongo_uri = os.environ.get("MONGO_URI")
+if not mongo_uri:
+    print("⚠️ Warning: MONGO_URI not found. Falling back to local MongoDB.")
+    mongo_uri = "mongodb://localhost:27017/airwatch"
 
-# ---- MODELS ----
-class User(UserMixin, db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+app.config["MONGO_URI"] = mongo_uri
 
-class SearchLog(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), nullable=False)
-    city = db.Column(db.String(100), nullable=False)
-    lat = db.Column(db.Float)
-    lon = db.Column(db.Float)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+# Using certifi to fix SSL handshake errors common with MongoDB Atlas
+try:
+    mongo = PyMongo(app, tlsCAFile=certifi.where())
+    print("✅ Successfully connected to MongoDB!")
+except Exception as e:
+    print(f"❌ MongoDB connection error: {e}")
+    mongo = None
+
+# ---- MODELS (MongoDB wrappers) ----
+class User(UserMixin):
+    def __init__(self, user_data):
+        self.id = str(user_data["_id"])
+        self.username = user_data["username"]
+        self.password = user_data["password"]
+        self.is_admin = user_data.get("is_admin", False)
 
 # ---- AUTH SETUP ----
 login_manager = LoginManager()
@@ -60,19 +63,23 @@ login_manager.login_view = 'login_page'
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    if mongo:
+        u = mongo.db.users.find_one({"_id": ObjectId(user_id)})
+        if u: return User(u)
+    return None
 
-# Create tables and default admin
+# Create default admin if it doesn't exist
 with app.app_context():
-    db.create_all()
-    if not User.query.filter_by(username='admin').first():
-        admin = User(
-            username='admin',
-            password=generate_password_hash('admin123'),
-            is_admin=True
-        )
-        db.session.add(admin)
-        db.session.commit()
+    if mongo:
+        admin_exists = mongo.db.users.find_one({"username": "admin"})
+        if not admin_exists:
+            mongo.db.users.insert_one({
+                "username": "admin",
+                "password": generate_password_hash("admin123"),
+                "is_admin": True,
+                "created_at": datetime.utcnow()
+            })
+            print("👤 Default admin user created.")
 
 # ---- CREATE INSTANCES ----
 fetcher   = PollutionDataFetcher()
@@ -84,24 +91,28 @@ predictor = AQIPredictor()
 
 @app.route("/api/register", methods=["POST"])
 def register():
+    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
+    
     data = request.json
-    if User.query.filter_by(username=data['username']).first():
+    if mongo.db.users.find_one({"username": data['username']}):
         return jsonify({"status": "error", "message": "Username already exists"}), 400
     
-    new_user = User(
-        username=data['username'],
-        password=generate_password_hash(data['password']),
-        is_admin=False
-    )
-    db.session.add(new_user)
-    db.session.commit()
+    mongo.db.users.insert_one({
+        "username": data['username'],
+        "password": generate_password_hash(data['password']),
+        "is_admin": False,
+        "created_at": datetime.utcnow()
+    })
     return jsonify({"status": "success", "message": "User registered"})
 
 @app.route("/api/login", methods=["POST"])
 def login():
+    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
+    
     data = request.json
-    user = User.query.filter_by(username=data['username']).first()
-    if user and check_password_hash(user.password, data['password']):
+    u_data = mongo.db.users.find_one({"username": data['username']})
+    if u_data and check_password_hash(u_data['password'], data['password']):
+        user = User(u_data)
         login_user(user)
         return jsonify({"status": "success", "user": {"username": user.username, "is_admin": user.is_admin}})
     return jsonify({"status": "error", "message": "Invalid credentials"}), 401
@@ -121,16 +132,17 @@ def user_status():
 @app.route("/api/log_search", methods=["POST"])
 @login_required
 def log_search():
+    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
+    
     data = request.json
-    new_log = SearchLog(
-        user_id=current_user.id,
-        username=current_user.username,
-        city=data.get('city', 'Unknown'),
-        lat=data.get('lat'),
-        lon=data.get('lon')
-    )
-    db.session.add(new_log)
-    db.session.commit()
+    mongo.db.search_logs.insert_one({
+        "user_id": current_user.id,
+        "username": current_user.username,
+        "city": data.get('city', 'Unknown'),
+        "lat": data.get('lat'),
+        "lon": data.get('lon'),
+        "timestamp": datetime.utcnow()
+    })
     return jsonify({"status": "success"})
 
 @app.route("/api/admin/logs")
@@ -138,17 +150,18 @@ def log_search():
 def export_logs():
     if not current_user.is_admin:
         return jsonify({"status": "error", "message": "Unauthorized"}), 403
+    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
     
-    logs = SearchLog.query.all()
+    logs = mongo.db.search_logs.find()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['ID', 'Username', 'City', 'Lat', 'Lon', 'Timestamp'])
     
     for log in logs:
-        writer.writerow([log.id, log.username, log.city, log.lat, log.lon, log.timestamp])
+        writer.writerow([str(log.get('_id')), log.get('username'), log.get('city'), log.get('lat'), log.get('lon'), log.get('timestamp')])
     
     response = make_response(output.getvalue())
-    response.headers["Content-Disposition"] = "attachment; filename=search_logs_sqlite.csv"
+    response.headers["Content-Disposition"] = "attachment; filename=search_logs_mongo.csv"
     response.headers["Content-type"] = "text/csv"
     return response
 
