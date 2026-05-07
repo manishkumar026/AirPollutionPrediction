@@ -43,6 +43,9 @@ app.config["MONGO_URI"] = mongo_uri
 # Using certifi to fix SSL handshake errors common with MongoDB Atlas
 try:
     mongo = PyMongo(app, tlsCAFile=certifi.where())
+    # If the user forgot to put a database name in the URI (e.g. /airwatch), mongo.db will be None.
+    if mongo.db is None:
+        mongo.db = mongo.cx["airwatch"]
     print("✅ Successfully connected to MongoDB!")
 except Exception as e:
     print(f"❌ MongoDB connection error: {e}")
