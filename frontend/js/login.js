@@ -1,13 +1,16 @@
 /* ============================================================
-   3D LOGIN BACKGROUND & AUTH LOGIC
+   AIRWATCH PRO - PREMIUM AUTH LOGIC
    ============================================================ */
 
 document.addEventListener('DOMContentLoaded', function() {
     initThreeBackground();
-    initAuthTabs();
-    initAuthForms();
+    initAuthFlow();
+    initPasswordToggles();
 });
 
+/**
+ * Enhanced Three.js background with subtle, high-end particles
+ */
 function initThreeBackground() {
     const container = document.getElementById('three-canvas-container');
     if (!container) return;
@@ -17,32 +20,37 @@ function initThreeBackground() {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
     // Create Particles
     const particlesGeometry = new THREE.BufferGeometry();
-    const particlesCount = 1500;
+    const particlesCount = 2000;
     const posArray = new Float32Array(particlesCount * 3);
+    const scaleArray = new Float32Array(particlesCount);
 
-    for (let i = 0; i < particlesCount * 3; i++) {
-        posArray[i] = (Math.random() - 0.5) * 10;
+    for (let i = 0; i < particlesCount; i++) {
+        posArray[i * 3] = (Math.random() - 0.5) * 10;
+        posArray[i * 3 + 1] = (Math.random() - 0.5) * 10;
+        posArray[i * 3 + 2] = (Math.random() - 0.5) * 10;
+        scaleArray[i] = Math.random();
     }
 
     particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    particlesGeometry.setAttribute('scale', new THREE.BufferAttribute(scaleArray, 1));
 
     const particlesMaterial = new THREE.PointsMaterial({
-        size: 0.005,
-        color: '#00b4ff',
+        size: 0.015,
+        color: '#00e5ff',
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.4,
         blending: THREE.AdditiveBlending
     });
 
     const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
     scene.add(particlesMesh);
 
-    camera.position.z = 2;
+    camera.position.z = 3;
 
     // Mouse Interaction
     let mouseX = 0;
@@ -57,12 +65,13 @@ function initThreeBackground() {
     function animate() {
         requestAnimationFrame(animate);
         
-        particlesMesh.rotation.y += 0.001;
-        particlesMesh.rotation.x += 0.0005;
+        particlesMesh.rotation.y += 0.0005;
+        particlesMesh.rotation.x += 0.0002;
 
         // Subtle movement based on mouse
-        particlesMesh.position.x += (mouseX * 0.5 - particlesMesh.position.x) * 0.05;
-        particlesMesh.position.y += (-mouseY * 0.5 - particlesMesh.position.y) * 0.05;
+        camera.position.x += (mouseX * 0.5 - camera.position.x) * 0.05;
+        camera.position.y += (-mouseY * 0.5 - camera.position.y) * 0.05;
+        camera.lookAt(scene.position);
 
         renderer.render(scene, camera);
     }
@@ -77,15 +86,21 @@ function initThreeBackground() {
     });
 }
 
-function initAuthTabs() {
+/**
+ * Handle Tab switching and Form submissions
+ */
+function initAuthFlow() {
     const tabLogin = document.getElementById('tab-login');
     const tabRegister = document.getElementById('tab-register');
+    const indicator = document.querySelector('.tab-indicator');
     const loginForm = document.getElementById('login-form');
     const registerForm = document.getElementById('register-form');
 
+    // Tab Switching
     tabLogin.addEventListener('click', () => {
         tabLogin.classList.add('active');
         tabRegister.classList.remove('active');
+        indicator.style.transform = 'translateX(0)';
         loginForm.classList.add('active');
         registerForm.classList.remove('active');
     });
@@ -93,19 +108,19 @@ function initAuthTabs() {
     tabRegister.addEventListener('click', () => {
         tabRegister.classList.add('active');
         tabLogin.classList.remove('active');
+        indicator.style.transform = 'translateX(100%)';
         registerForm.classList.add('active');
         loginForm.classList.remove('active');
     });
-}
 
-function initAuthForms() {
-    const loginForm = document.getElementById('login-form');
-    const registerForm = document.getElementById('register-form');
-
+    // Login Submission
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const btn = document.getElementById('login-btn');
         const username = document.getElementById('login-username').value;
         const password = document.getElementById('login-password').value;
+
+        setLoading(btn, true);
 
         try {
             const res = await fetch('/api/login', {
@@ -114,27 +129,35 @@ function initAuthForms() {
                 body: JSON.stringify({ username, password })
             });
             const data = await res.json();
+            
             if (data.status === 'success') {
-                window.location.href = '/';
+                showToast('Welcome back, ' + data.user.username + '!', 'success');
+                setTimeout(() => window.location.href = '/', 1000);
             } else {
-                alert(data.message || 'Login failed');
+                showToast(data.message || 'Invalid credentials', 'error');
+                setLoading(btn, false);
             }
         } catch (err) {
             console.error('Login error:', err);
-            alert('Connection failed');
+            showToast('Connection failed. Please try again.', 'error');
+            setLoading(btn, false);
         }
     });
 
+    // Register Submission
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const btn = document.getElementById('reg-btn');
         const username = document.getElementById('reg-username').value;
         const password = document.getElementById('reg-password').value;
         const confirm = document.getElementById('reg-confirm').value;
 
         if (password !== confirm) {
-            alert('Passwords do not match');
+            showToast('Passwords do not match', 'error');
             return;
         }
+
+        setLoading(btn, true);
 
         try {
             const res = await fetch('/api/register', {
@@ -143,15 +166,53 @@ function initAuthForms() {
                 body: JSON.stringify({ username, password })
             });
             const data = await res.json();
+            
             if (data.status === 'success') {
-                alert('Account created! Please login.');
-                document.getElementById('tab-login').click();
+                showToast('Account created! You can now sign in.', 'success');
+                setTimeout(() => {
+                    setLoading(btn, false);
+                    tabLogin.click();
+                }, 1500);
             } else {
-                alert(data.message || 'Registration failed');
+                showToast(data.message || 'Registration failed', 'error');
+                setLoading(btn, false);
             }
         } catch (err) {
             console.error('Register error:', err);
-            alert('Connection failed');
+            showToast('Connection failed. Please try again.', 'error');
+            setLoading(btn, false);
         }
     });
 }
+
+/**
+ * Toggle password visibility
+ */
+function initPasswordToggles() {
+    document.querySelectorAll('.toggle-password').forEach(icon => {
+        icon.addEventListener('click', function() {
+            const input = this.parentElement.querySelector('input');
+            if (input.type === 'password') {
+                input.type = 'text';
+                this.classList.replace('fa-eye', 'fa-eye-slash');
+            } else {
+                input.type = 'password';
+                this.classList.replace('fa-eye-slash', 'fa-eye');
+            }
+        });
+    });
+}
+
+/**
+ * Loading state for buttons
+ */
+function setLoading(btn, isLoading) {
+    if (isLoading) {
+        btn.classList.add('loading');
+        btn.disabled = true;
+    } else {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+    }
+}
+

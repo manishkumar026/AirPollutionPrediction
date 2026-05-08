@@ -8,8 +8,8 @@ OPENWEATHER_API_KEY = "1cc153b8da9c132a0ede08d220b59a60"
 # IQAIR API KEY (AirVisual)
 IQAIR_API_KEY = "27636e29-836f-490f-bc7f-01b3871d8b8e"
 
-# WAQI TOKEN (optional)
-WAQI_API_TOKEN = ""
+# WAQI TOKEN (CPCB Official Ground Station Data)
+WAQI_API_TOKEN = "c12943ab88ad31947b8aaf9568a9633988c61ce7"
 
 # API URLS
 OPENWEATHER_POLLUTION_URL = "http://api.openweathermap.org/data/2.5/air_pollution"

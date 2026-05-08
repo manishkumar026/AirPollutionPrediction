@@ -46,6 +46,24 @@ var CONV = {
 /* ============================================================
    SANITIZE HELPER - Prevent XSS
    ============================================================ */
+function anim(el, start, end, duration) {
+    if (typeof el === 'string') el = document.getElementById(el);
+    if (!el) return;
+    var range = end - start;
+    var startTime = null;
+    function step(timestamp) {
+        if (!startTime) startTime = timestamp;
+        var progress = Math.min((timestamp - startTime) / duration, 1);
+        el.textContent = Math.floor(progress * range + start);
+        if (progress < 1) {
+            window.requestAnimationFrame(step);
+        } else {
+            el.textContent = Math.round(end);
+        }
+    }
+    window.requestAnimationFrame(step);
+}
+
 function sanitize(str) {
     return String(str || '--')
         .replace(/&/g, '&amp;')
@@ -55,70 +73,107 @@ function sanitize(str) {
         .replace(/'/g, '&#039;');
 }
 
+function set(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
 /* ============================================================
    ON PAGE LOAD
    ============================================================ */
 window.addEventListener('load', async function () {
-    const auth = await checkAuth();
-    if (!auth) return;
+    console.log('🚀 [Heartbeat] Dashboard Booting...');
+    
+    // Hide loader immediately
+    setTimeout(hideLoader, 500); 
+
+    // Update: Check auth but don't force redirect
+    await checkAuth();
 
     startClock();
-    setTimeout(hideLoader, 2500);
+    console.log('🚀 [Heartbeat] Clock Started');
     
-    // --- Step 1: Try Geolocation first ---
+    // START IMMEDIATELY with defaults so the screen isn't empty
+    console.log('🚀 [Heartbeat] Loading Data...');
+    loadAll(); 
+
+    // Then try to refine with GPS in the background
     if (navigator.geolocation) {
-        console.log('[Geo] Requesting location...');
         navigator.geolocation.getCurrentPosition(
             function(pos) {
+                console.log('🚀 [Heartbeat] GPS Found, Updating...');
                 LAT = pos.coords.latitude;
                 LON = pos.coords.longitude;
-                console.log('[Geo] Found:', LAT, LON);
-                loadAll(); // Load with user location
+                loadAll(); 
             },
-            function(err) {
-                console.warn('[Geo] Denied or Error:', err.message);
-                loadAll(); // Fallback to default
-            }
+            function(err) { console.warn('GPS Denied/Failed'); }
         );
-    } else {
-        loadAll();
     }
 
     setInterval(function () { loadAll(true); }, 300000);
     initSearch();
     initKeyboardShortcuts();
-    console.log(
-        '%c🌍 AirWatch Pro v2.0 Ready!',
-        'color:#00b4ff;font-size:18px;font-weight:bold;' +
-        'background:#0a0f1e;padding:8px 16px;border-radius:8px'
-    );
+    initGlobalMap();
 });
 
 async function checkAuth() {
     try {
         const res = await fetch('/api/user_status');
         const data = await res.json();
+        
+        const up = document.getElementById('userProfile');
+        const lp = document.getElementById('navLoginBtn');
+
         if (!data.is_authenticated) {
-            window.location.href = '/login';
+            if (up) up.style.display = 'none';
+            if (lp) lp.style.display = 'block';
             return false;
         }
         
         // Show user profile
-        const up = document.getElementById('userProfile');
         if (up) up.style.display = 'block';
+        if (lp) lp.style.display = 'none';
         
         const un = document.getElementById('usernameLabel');
         if (un) un.textContent = data.username;
         
+        // Toggle dropdown for profile
+        const avatar = up.querySelector('.up-avatar');
+        const dropdown = up.querySelector('.up-dropdown');
+        if (avatar && dropdown) {
+            avatar.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const isOpen = dropdown.style.opacity === '1';
+                dropdown.style.opacity = isOpen ? '0' : '1';
+                dropdown.style.visibility = isOpen ? 'hidden' : 'visible';
+            });
+            
+            document.addEventListener('click', function() {
+                if (dropdown) {
+                    dropdown.style.opacity = '0';
+                    dropdown.style.visibility = 'hidden';
+                }
+            });
+            
+            dropdown.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+        }
+        
         if (data.is_admin) {
             const ab = document.getElementById('adminBadge');
             const eb = document.getElementById('adminExportBtn');
+            const sb = document.getElementById('dlSearchBtn');
+            const as = document.getElementById('adminLogSection');
             if (ab) ab.style.display = 'block';
             if (eb) eb.style.display = 'block';
+            if (sb) sb.style.display = 'flex';
+            if (as) as.style.display = 'block';
+            loadAdminLogs();
         }
         return true;
     } catch (e) {
-        window.location.href = '/login';
+        console.error('Auth check failed:', e);
         return false;
     }
 }
@@ -130,6 +185,29 @@ async function logout() {
 
 function exportLogs() {
     window.location.href = '/api/admin/logs';
+}
+
+async function loadAdminLogs() {
+    try {
+        const res = await fetch('/api/admin/recent_searches');
+        const data = await res.json();
+        const body = document.getElementById('adminLogBody');
+        if (!body) return;
+
+        if (data.status === 'success' && data.logs.length > 0) {
+            body.innerHTML = data.logs.map(log => `
+                <tr>
+                    <td style="color: var(--txt1); font-weight: 600;">${sanitize(log.username)}</td>
+                    <td style="color: var(--txt2);">${sanitize(log.city)}</td>
+                    <td style="color: var(--txt3); font-size: 0.75rem;">${sanitize(log.timestamp)}</td>
+                </tr>
+            `).join('');
+        } else {
+            body.innerHTML = `<tr><td colspan="3" style="text-align:center; padding: 20px; color: var(--txt3);">No recent searches found.</td></tr>`;
+        }
+    } catch (e) {
+        console.error('Failed to load admin logs:', e);
+    }
 }
 
 /* ============================================================
@@ -292,10 +370,19 @@ async function loadAll(silent) {
     }
 
     try {
-        var r = await api.fetchAll(LAT, LON);
+        console.log('📡 [Step 1] Attempting to talk to Server...');
+        
+        // 5-second "Auto-Unlock" Fail-safe
+        const timeout = setTimeout(() => {
+            console.warn('⚠️ Server taking too long. Unlocking Demo Mode...');
+            useDemo();
+            hideLoader();
+        }, 5000);
 
-        console.log('%c[APP] Source: ' + r.source,
-            'color:#7c5cfc;font-weight:bold');
+        var r = await api.fetchAll(LAT, LON);
+        clearTimeout(timeout);
+        
+        console.log('📡 [Step 2] Server Responded. Source:', r.source);
 
         if (r.source === 'direct' || r.source === 'backend') {
             if (r.waqi_available && r.waqi_station) {
@@ -309,7 +396,10 @@ async function loadAll(silent) {
                 updateSourceBar('owm');
             }
             if (r.source === 'backend') useBackend(r.data);
-            else                        useDirect(r.p, r.w, r.f);
+            else                        useDirect(r.data.pollution, r.data.weather, r.data.forecast);
+            
+            // 🔥 LOAD GLOBAL OVERWORLD DATA
+            loadOverworldData();
 
         } else if (r.source === 'badkey') {
             updateSourceBar('demo');
@@ -347,8 +437,13 @@ function useBackend(d) {
             updateWeather(d.weather);
         }
         if (d.forecast && d.forecast.status === 'success') {
-            forecastData = normaliseForecast(d.forecast.forecasts || []);
+            forecastData = normaliseForecast(d.forecast.forecasts || d.forecast.list || []);
             buildChart(forecastData, curTab);
+            
+            // New: Draw Heatmap
+            if (typeof charts !== 'undefined' && charts.heatmap) {
+                charts.heatmap('heatmapCanvas', forecastData);
+            }
         }
         if (d.ml_prediction && d.ml_prediction.status === 'success') {
             updateAI(d.ml_prediction);
@@ -559,26 +654,26 @@ function useDirect(p, w, f) {
         /* ── Forecast ── */
         if (f && f.list && f.list.length > 0) {
             forecastData = f.list.slice(0, 24).map(function (x) {
-                var fc = {
-                    pm2_5 : x.components.pm2_5 || 0,
-                    pm10  : x.components.pm10  || 0,
-                    no2   : x.components.no2   || 0,
-                    o3    : x.components.o3    || 0,
-                    co    : x.components.co    || 0,
-                    so2   : x.components.so2   || 0,
-                };
-                var fr = calcAccurateAQI(fc);
+                var c = x.components || {};
+                var fr = calcAccurateAQI({ 
+                    pm2_5: c.pm2_5 || 0, 
+                    pm10:  c.pm10  || 0, 
+                    no2:   c.no2   || 0, 
+                    o3:    c.o3    || 0, 
+                    co:    c.co    || 0, 
+                    so2:   c.so2   || 0 
+                });
                 return {
-                    hour_label : new Date(x.dt * 1000).getHours() + ':00',
                     timestamp  : x.dt,
                     aqi        : fr.aqi,
                     dominant   : fr.dominant,
-                    pm2_5      : x.components.pm2_5,
-                    pm10       : x.components.pm10,
-                    no2        : x.components.no2,
-                    o3         : x.components.o3,
-                    co         : x.components.co,
-                    so2        : x.components.so2,
+                    pm2_5      : c.pm2_5 || 0,
+                    pm10       : c.pm10  || 0,
+                    no2        : c.no2   || 0,
+                    o3         : c.o3    || 0,
+                    co         : c.co    || 0,
+                    so2        : c.so2   || 0,
+                    hour_label : new Date(x.dt * 1000).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true }).replace(':00', '')
                 };
             });
 
@@ -588,17 +683,198 @@ function useDirect(p, w, f) {
                 return { hour: i + 1, predicted_aqi: x.aqi };
             });
             updateForecasts(preds);
-            drawHeatmap(forecastData);
+            if (typeof charts !== 'undefined' && charts.heatmap) {
+                charts.heatmap('heatmapCanvas', forecastData);
+            }
             buildHistoryTable(forecastData);
+
+            // New: Top comparison chart initialization with delay for layout settle
+            setTimeout(function() {
+                var cLabels = forecastData.slice(0, 24).map(x => x.hour_label);
+                var cPm25   = forecastData.slice(0, 24).map(x => x.pm2_5);
+                var cPm10   = forecastData.slice(0, 24).map(x => x.pm10);
+                charts.compare(cLabels, cPm25, cPm10);
+            }, 50);
         }
 
-        toast('✅ Data loaded successfully!', 'success');
+        updateDynamicTheme(poll.aqi, w);
+        toast('✅ Dashboard Synchronized', 'success');
 
     } catch (e) {
-        console.error('useDirect error:', e);
+        console.error('CRITICAL LOAD ERROR:', e);
+        toast('⚠️ Connection issue - Switching to local AI mode', 'warning');
         updateSourceBar('demo');
         useDemo();
     }
+}
+
+/* --- DYNAMIC SKY & ALERTS --- */
+function updateDynamicTheme(aqi, weather) {
+    var b = document.body;
+    var alert = document.getElementById('pollutionAlert');
+    
+    // 1. SKY THEME
+    b.classList.remove('sky-day', 'sky-night', 'sky-haze');
+    
+    var icon = weather && weather.weather ? weather.weather[0].icon : '01d';
+    var isNight = icon.includes('n');
+    var isHazy  = icon.includes('50'); // 50d/50n is mist/haze/smog
+    
+    if (isHazy) {
+        b.classList.add('sky-haze');
+    } else if (isNight) {
+        b.classList.add('sky-night');
+    } else {
+        b.classList.add('sky-day');
+    }
+    
+    // 2. POLLUTION ALERT
+    if (aqi >= 200) {
+        alert.classList.add('active');
+        // Optional: Change text based on severity
+        if (aqi > 300) {
+            alert.querySelector('span').textContent = '☠️ CRITICAL: HAZARDOUS AIR QUALITY - STAY INDOORS';
+        } else {
+            alert.querySelector('span').textContent = '⚠️ EMERGENCY: EXTREME POLLUTION DETECTED';
+        }
+    } else {
+        alert.classList.remove('active');
+    }
+}
+
+/* --- PDF EXPORT ENGINE --- */
+function exportToPDF() {
+    toast('📄 Preparing your health report...', 'info');
+    
+    var element = document.querySelector('.layout'); // Capture the main dashboard area
+    var cityName = document.getElementById('locCity').textContent || 'City';
+    var dateStr = new Date().toLocaleDateString();
+
+    var opt = {
+        margin:       [0.5, 0.5, 0.5, 0.5],
+        filename:     'AirWatch_Report_' + cityName + '_' + dateStr + '.pdf',
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { 
+            scale: 2, 
+            useCORS: true, 
+            backgroundColor: '#03050c',
+            logging: false
+        },
+        jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+    };
+
+    // New: Temporarily show hidden elements for the PDF
+    html2pdf().set(opt).from(element).save().then(function() {
+        toast('✅ Report downloaded!', 'success');
+    }).catch(function(err) {
+        console.error('PDF Error:', err);
+        toast('❌ Error generating report', 'error');
+    });
+}
+
+
+
+/* --- GLOBAL HEATMAP ENGINE --- */
+var globalMap = null;
+function initGlobalMap() {
+    if (globalMap) return;
+    
+    try {
+        if (typeof L === 'undefined') {
+            console.warn('Leaflet not loaded yet, retrying in 1s...');
+            setTimeout(initGlobalMap, 1000);
+            return;
+        }
+
+        // Create map centered on New Delhi but zoomed out for world view
+        globalMap = L.map('global-map', {
+        center: [20, 10],
+        zoom: 2,
+        zoomControl: false,
+        attributionControl: false
+    });
+
+    // Premium Dark Matter tiles for that "Pro" look
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19
+    }).addTo(globalMap);
+
+    // Add WAQI real-time AQI map tiles for global coverage
+    var waqiToken = 'c12943ab88ad31947b8aaf9568a9633988c61ce7';
+    L.tileLayer('https://tiles.waqi.info/tiles/usepa-aqi/{z}/{x}/{y}.png?token=' + waqiToken, {
+        maxZoom: 19,
+        attribution: 'Air Quality Tiles &copy; <a href="https://waqi.info/">WAQI</a>'
+    }).addTo(globalMap);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(globalMap);
+
+    // Initial Cities to show on Map
+    var cities = [
+        { name: "New Delhi", lat: 28.6139, lon: 77.2090 },
+        { name: "Mumbai", lat: 19.0760, lon: 72.8777 },
+        { name: "New York", lat: 40.7128, lon: -74.0060 },
+        { name: "London", lat: 51.5074, lon: -0.1278 },
+        { name: "Tokyo", lat: 35.6895, lon: 139.6917 },
+        { name: "Sydney", lat: -33.8688, lon: 151.2093 },
+        { name: "Paris", lat: 48.8566, lon: 2.3522 },
+        { name: "Dubai", lat: 25.2048, lon: 55.2708 },
+        { name: "Beijing", lat: 39.9042, lon: 116.4074 },
+        { name: "Cairo", lat: 30.0444, lon: 31.2357 }
+    ];
+
+    cities.forEach(function(city) {
+        api.fetchCityAQI(city.lat, city.lon).then(function(res) {
+            if (res && res.status === 'success') {
+                var aqi = (res.pollution && res.pollution.aqi) || res.aqi || 0;
+                var cat = getAQICat(aqi);
+                var color = cat.color;
+                
+                var markerHtml = `
+                    <div style="
+                        background: ${color};
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 50%;
+                        border: 2px solid white;
+                        box-shadow: 0 0 15px ${color};
+                        animation: ow-pulse 2s infinite;
+                    "></div>
+                `;
+
+                var icon = L.divIcon({
+                    html: markerHtml,
+                    className: '',
+                    iconSize: [20, 20]
+                });
+
+                L.marker([city.lat, city.lon], { icon: icon })
+                    .addTo(globalMap)
+                    .bindPopup(`
+                        <div style="color:#fff; background:#0a0e1e; padding:10px; border-radius:8px;">
+                            <b style="font-size:1.1rem">${city.name}</b><br>
+                            <span style="color:${color}; font-weight:800; font-size:1.2rem">AQI: ${aqi}</span><br>
+                            <small>${getAQICat(aqi).label}</small><br>
+                            <button onclick="searchManual('${city.name}', ${city.lat}, ${city.lon})" 
+                                style="margin-top:10px; width:100%; padding:5px; background:var(--accent); color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                                View Details
+                            </button>
+                        </div>
+                    `, { backgroundColor: '#0a0e1e', closeButton: false });
+                }
+            });
+        });
+    } catch (e) {
+        console.error('Map Init Error:', e);
+    }
+}
+
+// Fixed Search Manual helper for Map markers
+function searchManual(name, lat, lon) {
+    document.getElementById('citySearch').value = name;
+    LAT = parseFloat(lat);
+    LON = parseFloat(lon);
+    loadAll();
+    api.logSearch(name, LAT, LON);
 }
 
 /* ============================================================
@@ -974,7 +1250,11 @@ function setBar(id, val, max, color) {
    BUILD TREND CHART
    ============================================================ */
 function buildChart(data, tab) {
-    if (!data || !data.length) return;
+    console.log('[Chart] Building trend for:', tab, 'Data points:', data ? data.length : 0);
+    if (!data || !data.length) {
+        console.warn('[Chart] No data provided for trend chart');
+        return;
+    }
     var values, label, color;
 
     if (tab === 'pm25') {
@@ -995,10 +1275,17 @@ function buildChart(data, tab) {
     }
 
     if (typeof charts !== 'undefined' && charts.trend) {
-        charts.trend(
-            data.map(function (f) { return f.hour_label || ''; }),
-            values, label, color
-        );
+        try {
+            charts.trend(
+                data.map(function (f) { return f.hour_label || ''; }),
+                values, label, color
+            );
+            console.log('[Chart] Trend rendered successfully');
+        } catch (e) {
+            console.error('[Chart] Render failed:', e.message);
+        }
+    } else {
+        console.error('[Chart] charts.trend not found! Is charts.js loaded?');
     }
 }
 
@@ -1047,7 +1334,7 @@ function initSearch() {
         var val = si.value.trim();
         selectedCityIndex = -1;
         clearTimeout(autocompleteTimer);
-        if (val.length < 2) { closeAutocomplete(); return; }
+        if (val.length < 1) { closeAutocomplete(); return; }
         autocompleteTimer = setTimeout(function () {
             showAutocomplete(val);
         }, 300);
@@ -1092,10 +1379,7 @@ async function showAutocomplete(query) {
                 + '</span></div></div>';
         };
 
-        var html = '<div class="ac-scroll-buttons">'
-            + '<button class="ac-scroll-btn" onclick="scrollAutocomplete(-1)">'
-            + '<i class="fas fa-chevron-up"></i></button></div>'
-            + '<div class="ac-items-container">';
+        var html = '<div class="ac-items-container">';
 
         if (indian.length) {
             html += '<div class="ac-section">🇮🇳 India</div>';
@@ -1106,10 +1390,7 @@ async function showAutocomplete(query) {
             html += other.map(makeItem).join('');
         }
 
-        html += '</div>'
-            + '<div class="ac-scroll-buttons">'
-            + '<button class="ac-scroll-btn" onclick="scrollAutocomplete(1)">'
-            + '<i class="fas fa-chevron-down"></i></button></div>';
+        html += '</div>';
 
         drop.innerHTML = html;
         drop.querySelectorAll('.ac-item').forEach(function (item) {
@@ -1172,6 +1453,7 @@ async function doSearch() {
             closeAutocomplete();
             loadAll();
             toast('Loading data for ' + sanitize(r.name), 'success');
+            api.logSearch(r.name || city, LAT, LON);
         } else {
             toast('City not found!', 'error');
         }
@@ -1304,6 +1586,7 @@ function autoFillForm() {
    ============================================================ */
 function useDemo() {
     updateSourceBar('demo');
+    var now = new Date();
 
     var poll = {
         status : 'success',
@@ -1380,7 +1663,10 @@ function useDemo() {
         });
 
         forecastData.push({
-            hour_label : i + ':00',
+            hour_label : new Date(now.getTime() + i * 3600000).toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                hour12: true
+            }).replace(':00', ''),
             aqi        : fc.aqi,
             dominant   : fc.dominant,
             pm2_5      : +dp25.toFixed(1),
@@ -1393,10 +1679,15 @@ function useDemo() {
     }
 
     buildChart(forecastData, 'aqi');
+    
+    // Draw Heatmap for Demo
+    if (typeof charts !== 'undefined' && charts.heatmap) {
+        charts.heatmap('heatmapCanvas', forecastData);
+    }
+    
     LIVE = { poll: poll, weather: weather };
+}
 
-    /* updateAllFeatures is already called inside updateLeft above */
-    /* REMOVED the duplicate setTimeout call that caused double render */
 function normaliseForecast(list) {
     if (!list || !list.length) return [];
     return list.map(function (f) {
@@ -1405,16 +1696,16 @@ function normaliseForecast(list) {
         var ampm = h >= 12 ? 'PM' : 'AM';
         h = h % 12 || 12;
         
-        var comps = f.components || {};
+        var comps = f.components || f || {};
         return {
-            hour_label: h + ampm,
+            hour_label: f.hour_label || (h + ampm),
             aqi: f.aqi || 0,
-            pm2_5: comps.pm2_5 || 0,
-            pm10: comps.pm10 || 0,
-            no2: comps.no2 || 0,
-            o3: comps.o3 || 0,
-            so2: comps.so2 || 0,
-            co: comps.co || 0
+            pm2_5: f.pm2_5 || comps.pm2_5 || 0,
+            pm10: f.pm10 || comps.pm10 || 0,
+            no2: f.no2 || comps.no2 || 0,
+            o3: f.o3 || comps.o3 || 0,
+            so2: f.so2 || comps.so2 || 0,
+            co: f.co || comps.co || 0
         };
     });
 }
@@ -1595,29 +1886,24 @@ function getAQICat(aqi) {
     };
     if (aqi <= 100) return {
         label:'Moderate', color:'#ffff00', icon:'fas fa-meh',
-        advice:'Acceptable air quality. Unusually sensitive people '
-             + 'should consider reducing prolonged outdoor exertion.',
+        advice:'Acceptable air quality. Unusually sensitive people should consider reducing prolonged outdoor exertion.',
     };
     if (aqi <= 150) return {
         label:'Unhealthy for Sensitive Groups',
         color:'#ff7e00', icon:'fas fa-frown',
-        advice:'Children, elderly & people with respiratory disease '
-             + 'should limit prolonged outdoor exertion.',
+        advice:'Children, elderly & people with respiratory disease should limit prolonged outdoor exertion.',
     };
     if (aqi <= 200) return {
         label:'Unhealthy', color:'#ff0000', icon:'fas fa-tired',
-        advice:'Everyone may begin to experience health effects. '
-             + 'Wear a mask outdoors.',
+        advice:'Everyone may begin to experience health effects. Wear a mask outdoors.',
     };
     if (aqi <= 300) return {
         label:'Very Unhealthy', color:'#8f3f97', icon:'fas fa-skull',
-        advice:'Health alert! Everyone may experience serious effects. '
-             + 'Avoid all outdoor activities.',
+        advice:'Health alert! Everyone may experience serious effects. Avoid all outdoor activities.',
     };
     return {
         label:'Hazardous', color:'#7e0023', icon:'fas fa-biohazard',
-        advice:'Emergency conditions! Stay indoors, seal windows. '
-             + 'Seek medical help if unwell.',
+        advice:'Emergency conditions! Stay indoors, seal windows. Seek medical help if unwell.',
     };
 }
 
@@ -1739,30 +2025,70 @@ function drawHeatmap(data) {
 
     if (!data || !data.length) {
         data = Array.from({ length: 24 }, function (_, i) {
-            return { pm2_5: 30 + Math.random() * 150, hour_label: i + ':00' };
+            return { aqi: 30 + Math.random() * 150, hour_label: i + ':00' };
         });
     }
 
-    var cellW = w / data.length;
+    // --- PREMIUM BAR GRAPH ---
+    var maxAqi = Math.max.apply(null, data.map(function(d) { return d.aqi || 50; })) || 200;
+    maxAqi = Math.max(maxAqi, 150); // Ensure reasonable scale
+    var maxBarHeight = h - 60; // Increased padding for numbers
+    var barWidth = Math.max((w / data.length) - 4, 2);
+
     data.forEach(function (d, i) {
-        var aqi   = d.aqi || calcAQI_PM25(d.pm2_5 || 50);
+        var aqi = d.aqi || calcAQI_PM25(d.pm2_5 || 50);
         var color = getAQIColor(aqi);
-        var grad  = ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, color + 'dd');
-        grad.addColorStop(1, color + '44');
-        ctx.globalAlpha = 0.85;
-        ctx.fillStyle   = grad;
-        ctx.fillRect(i * cellW, 0, cellW - 1, h - 24);
-        ctx.globalAlpha  = 1;
-        ctx.fillStyle    = 'rgba(255,255,255,0.7)';
-        ctx.font         = '9px Inter';
-        ctx.textAlign    = 'center';
-        ctx.fillText(i + 'h', i * cellW + cellW / 2, h - 8);
-        ctx.fillStyle = '#fff';
-        ctx.font      = 'bold 11px Inter';
-        ctx.fillText(Math.round(aqi), i * cellW + cellW / 2, h / 2);
+        var barHeight = (aqi / maxAqi) * maxBarHeight;
+        if (barHeight < 5) barHeight = 5;
+
+        var x = i * (w / data.length) + 2;
+        var y = h - 35 - barHeight;
+
+        // Draw bar
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, barWidth, barHeight, [4, 4, 0, 0]);
+        } else {
+            ctx.rect(x, y, barWidth, barHeight);
+        }
+        ctx.fill();
+
+        // Add subtle glow inside bar
+        ctx.globalCompositeOperation = 'lighter';
+        var glow = ctx.createLinearGradient(x, y, x, y + barHeight);
+        glow.addColorStop(0, 'rgba(255,255,255,0.3)');
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(x, y, barWidth, barHeight);
+        ctx.globalCompositeOperation = 'source-over';
+
+        // --- NEW: Draw AQI Number above bar ---
+        ctx.font = 'bold 9px Inter';
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.round(aqi), x + (barWidth / 2), y - 8);
     });
-    ctx.globalAlpha = 1;
+
+    // Draw Hour Labels
+    ctx.font      = '500 10px Inter';
+    ctx.textAlign = 'center';
+
+    data.forEach(function (d, i) {
+        if (i % 2 === 0) { // Show every 2 hours to keep it clean
+            var x = i * (w / data.length) + (w / data.length) / 2;
+
+            // Label
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.fillText(d.hour_label || (i + ':00'), x, h - 15);
+        }
+    });
+
+    // Draw Graph Title
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font      = 'bold 10px Inter';
+    ctx.textAlign = 'center';
+    ctx.fillText('24H AQI FORECAST', w / 2, 12);
 }
 
 /* ============================================================
@@ -1968,23 +2294,24 @@ function buildHistoryTable(data) {
         var label = getAQILabel(aqi);
         var prev  = idx > 0 ? calcAccurateAQI(data[idx - 1]).aqi : aqi;
         var trend = idx === 0
-            ? '<i class="fas fa-minus" style="color:#888"></i>'
+            ? '<i class="fas fa-minus" style="color:#888; font-size: 0.7rem;"></i>'
             : aqi > prev
-                ? '<i class="fas fa-arrow-up" style="color:#f44444"></i>'
-                : '<i class="fas fa-arrow-down" style="color:#2dd4a0"></i>';
+                ? '<i class="fas fa-arrow-up" style="color:#ff3366; font-size: 0.7rem;"></i>'
+                : '<i class="fas fa-arrow-down" style="color:#00ff88; font-size: 0.7rem;"></i>';
 
         return '<tr>'
-            + '<td style="color:rgba(255,255,255,.6)">'
+            + '<td style="color:var(--txt2); font-weight: 600; font-size: 0.85rem;">'
             +     sanitize(d.hour_label || '--') + '</td>'
-            + '<td><strong style="color:' + color + '">'
-            +     aqi + '</strong> ' + trend + '</td>'
-            + '<td>' + (parseFloat(d.pm2_5) || 0).toFixed(1) + '</td>'
-            + '<td>' + (parseFloat(d.pm10)  || 0).toFixed(1) + '</td>'
-            + '<td>' + (parseFloat(d.no2)   || 0).toFixed(1) + '</td>'
-            + '<td>' + (parseFloat(d.o3)    || 0).toFixed(1) + '</td>'
+            + '<td style="padding: 12px 8px;"><div style="display:flex; align-items:center; gap:8px;">'
+            +     '<span style="font-size:1.15rem; font-weight:900; color:' + color + '; text-shadow: 0 0 10px ' + color + '33;">' + aqi + '</span>'
+            +     trend + '</div></td>'
+            + '<td style="font-weight:500;">' + (parseFloat(d.pm2_5) || 0).toFixed(1) + '</td>'
+            + '<td style="font-weight:500;">' + (parseFloat(d.pm10)  || 0).toFixed(1) + '</td>'
+            + '<td style="font-weight:500;">' + (parseFloat(d.no2)   || 0).toFixed(1) + '</td>'
+            + '<td style="font-weight:500;">' + (parseFloat(d.o3)    || 0).toFixed(1) + '</td>'
             + '<td><span class="status-badge" style="background:'
-            +     color + '22;color:' + color
-            +     ';border:1px solid ' + color + '44">'
+            +     color + '15; color:' + color
+            +     '; border:1px solid ' + color + '33; font-weight: 700; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; text-transform: uppercase;">'
             +     sanitize(label) + '</span></td>'
             + '</tr>';
     }).join('');
@@ -2147,103 +2474,29 @@ function drawExtraCharts(poll) {
                 ],
             },
             options : Object.assign({}, base, {
-                scales  : { r: {
-                    min         : 0,
-                    max         : 100,
-                    grid        : { color: 'rgba(255,255,255,0.06)' },
-                    angleLines  : { color: 'rgba(255,255,255,0.06)' },
-                    ticks       : { display: false },
-                    pointLabels : {
+                scales : { r: {
+                    min        : 0,
+                    max        : 100,
+                    grid       : { color: 'rgba(255,255,255,0.06)' },
+                    angleLines : { color: 'rgba(255,255,255,0.06)' },
+                    ticks      : { display: false },
+                    pointLabels: {
                         color: 'rgba(255,255,255,0.8)',
                         font : { size: 11 },
                     },
                 }},
-                plugins : { legend: {
-                    position: 'bottom',
-                    labels  : {
-                        color  : 'rgba(255,255,255,0.7)',
-                        font   : { size: 10 },
-                        padding: 16,
-                    },
-                }},
-            }),
-        });
-    }
-
-    /* ── COMPARE ── */
-    var cc = document.getElementById('compareChart');
-    if (cc) {
-        if (chartInstances.compare) chartInstances.compare.destroy();
-        var cd = forecastData.length ? forecastData
-            : Array.from({ length: 24 }, function (_, i) {
-                var hm = (i >= 6 && i <= 9) || (i >= 17 && i <= 20) ? 1.3 : 0.85;
-                return {
-                    hour_label : i + ':00',
-                    pm2_5      : +(30 + Math.random() * 120 * hm).toFixed(1),
-                    pm10       : +(50 + Math.random() * 150 * hm).toFixed(1),
-                    no2        : +(10 + Math.random() * 60  * hm).toFixed(1),
-                };
-            });
-
-        chartInstances.compare = new Chart(cc, {
-            type : 'line',
-            data : {
-                labels   : cd.map(function (f) { return f.hour_label || ''; }),
-                datasets : [
-                    {
-                        label           : 'PM2.5 (µg/m³)',
-                        data            : cd.map(function (f) { return +(f.pm2_5 || 0).toFixed(1); }),
-                        borderColor     : '#00b4ff',
-                        backgroundColor : 'rgba(0,180,255,0.1)',
-                        borderWidth     : 2.5, tension: 0.4, fill: true,
-                        pointRadius: 0, pointHoverRadius: 5,
-                    },
-                    {
-                        label           : 'PM10 (µg/m³)',
-                        data            : cd.map(function (f) { return +(f.pm10 || 0).toFixed(1); }),
-                        borderColor     : '#7c5cfc',
-                        backgroundColor : 'rgba(124,92,252,0.1)',
-                        borderWidth     : 2.5, tension: 0.4, fill: true,
-                        pointRadius: 0, pointHoverRadius: 5,
-                    },
-                    {
-                        label           : 'NO₂ (µg/m³)',
-                        data            : cd.map(function (f) { return +(f.no2 || 0).toFixed(1); }),
-                        borderColor     : '#2dd4a0',
-                        backgroundColor : 'rgba(45,212,160,0.06)',
-                        borderWidth     : 2, tension: 0.4, fill: false,
-                        pointRadius: 0, pointHoverRadius: 5,
-                    },
-                ],
-            },
-            options : {
-                responsive: true, maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                animation  : { duration: 1000, easing: 'easeInOutQuart' },
-                plugins    : {
-                    legend  : {
+                plugins: {
+                    legend: {
+                        display : true,
                         position: 'bottom',
-                        labels  : { color:'rgba(255,255,255,0.7)', font:{size:11}, padding:16, usePointStyle:true },
-                    },
-                    tooltip : {
-                        backgroundColor: 'rgba(10,15,30,0.95)',
-                        borderColor    : 'rgba(255,255,255,0.1)',
-                        borderWidth    : 1, padding: 10,
-                    },
-                },
-                scales : {
-                    x : {
-                        grid  : { color: 'rgba(255,255,255,0.03)' },
-                        ticks : { color:'rgba(255,255,255,0.5)', font:{size:10}, maxTicksLimit:8 },
-                    },
-                    y : {
-                        grid        : { color: 'rgba(255,255,255,0.04)' },
-                        beginAtZero : true,
-                        ticks       : { color:'rgba(255,255,255,0.5)', font:{size:10} },
-                        title       : { display:true, text:'µg/m³', color:'rgba(255,255,255,0.4)', font:{size:10} },
-                    },
-                },
-            },
+                        labels  : {
+                            color  : 'rgba(255,255,255,0.7)',
+                            font   : { size: 10 },
+                            padding: 16
+                        }
+                    }
+                }
+            })
         });
     }
 
@@ -2363,12 +2616,22 @@ function switchHistoryView(view, btn) {
     document.querySelectorAll('#btnChart,#btnTable')
         .forEach(function (b) { b.classList.remove('active'); });
     if (btn) btn.classList.add('active');
+    
     var cv = document.getElementById('historyChartView');
     var tv = document.getElementById('historyTableView');
+    
     if (view === 'chart') {
         if (cv) cv.style.display = 'block';
         if (tv) tv.style.display = 'none';
-        drawHistoryBarChart(forecastData.length ? forecastData : null);
+        
+        // Force a small delay to allow the container to be visible before drawing
+        setTimeout(function() {
+            drawHistoryBarChart(forecastData.length ? forecastData : null);
+            if (chartInstances.historyBar) {
+                chartInstances.historyBar.update();
+                chartInstances.historyBar.resize();
+            }
+        }, 50);
     } else {
         if (cv) cv.style.display = 'none';
         if (tv) tv.style.display = 'block';
@@ -2457,17 +2720,23 @@ function drawHistoryBarChart(data) {
                     borderWidth     : 2,
                     borderRadius    : 6,
                     borderSkipped   : false,
+                    order           : 1 // Bars in background
                 },
                 {
-                    label       : 'Trend',
+                    label       : 'AQI Trend',
                     data        : values,
                     type        : 'line',
-                    borderColor : 'rgba(255,255,255,0.3)',
-                    borderWidth : 2,
-                    borderDash  : [4, 4],
-                    pointRadius : 0,
-                    tension     : 0.4,
+                    borderColor : '#00e1ff',
+                    borderWidth : 5,
+                    pointRadius : 5,
+                    pointBackgroundColor: '#00e1ff',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    tension     : 0.45,
                     fill        : false,
+                    order       : 0,
+                    shadowColor : '#00e1ff',
+                    shadowBlur  : 15
                 },
             ],
         },
@@ -2724,6 +2993,44 @@ function downloadReport() {
     toast('Report downloaded!', 'success');
 }
 
+/**
+ * NEW: Download specific search record (User + Location + Data)
+ * Requested by mentor: "when the user search any location then the location and user name"
+ */
+function downloadSearchRecord() {
+    const username = document.getElementById('usernameLabel').textContent || 'User';
+    const location = document.getElementById('locCity').textContent || 'Unknown';
+    const sub      = document.getElementById('locSub').textContent || '';
+    const aqi      = document.getElementById('aqiBigNum').textContent || '--';
+    const timestamp = new Date().toLocaleString();
+
+    const content = `
+╔══════════════════════════════════════════╗
+║        SEARCH ACTIVITY RECORD            ║
+╚══════════════════════════════════════════╝
+
+User        : ${username}
+Location    : ${location} (${sub})
+AQI Result  : ${aqi}
+Timestamp   : ${timestamp}
+Coordinates : ${LAT.toFixed(4)}, ${LON.toFixed(4)}
+
+--------------------------------------------
+Generated by AirWatch Pro Search Logging System
+--------------------------------------------
+`;
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SearchRecord_${location.replace(/\s+/g, '_')}_${new Date().getTime()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    toast('Search record exported!', 'success');
+}
+
 /* Keep downloadPDF as alias for backward compatibility */
 function downloadPDF() {
     downloadReport();
@@ -2760,7 +3067,37 @@ function updateAllFeatures(poll, aqi) {
     );
 
     drawSpeedometer(displayAQI);
-    drawHeatmap(forecastData.length ? forecastData : null);
+    if (typeof charts !== 'undefined' && charts.heatmap) {
+        if (!forecastData || !forecastData.length) {
+            // Generate simulated forecast based on current real-time AQI (like demo mode)
+            var simulatedData = [];
+            var now = new Date();
+            for (var i = 0; i < 24; i++) {
+                var hm = 1.0;
+                var hour = (now.getHours() + i) % 24;
+                if (hour >= 6  && hour <= 9)  hm = 1.50; // Morning peak (rush hour)
+                if (hour >= 12 && hour <= 14) hm = 0.80; // Midday drop
+                if (hour >= 17 && hour <= 20) hm = 1.40; // Evening peak
+                if (hour >= 22 || hour <= 5)  hm = 0.50; // Night low (best air)
+
+                var simulatedAqi = displayAQI * hm;
+                simulatedAqi = Math.min(Math.max(simulatedAqi, 0), 500); // Clamp
+
+                var ampm = hour >= 12 ? 'PM' : 'AM';
+                var hour12 = hour % 12 || 12;
+
+                simulatedData.push({
+                    hour_label : hour12 + ' ' + ampm,
+                    aqi        : simulatedAqi
+                });
+            }
+            charts.heatmap('heatmapCanvas', simulatedData);
+            forecastData = simulatedData;
+            buildChart(forecastData, 'aqi');
+        } else {
+            charts.heatmap('heatmapCanvas', forecastData);
+        }
+    }
     buildHistoryTable(forecastData.length ? forecastData : null);
 
     try {
@@ -2782,4 +3119,179 @@ function updateAllFeatures(poll, aqi) {
     } else {
         updateBreakdownBadges(calcAccurateAQI(poll).breakdown);
     }
+}
+
+/* ============================================================
+   OVERWORLD: GLOBAL AQI EXPLORER
+   ============================================================ */
+var WORLD_CITIES = [
+    { name: 'New York',    lat: 40.7128,  lon: -74.0060, country: 'USA' },
+    { name: 'London',      lat: 51.5074,  lon: -0.1278,  country: 'UK' },
+    { name: 'Tokyo',       lat: 35.6895,  lon: 139.6917, country: 'Japan' },
+    { name: 'Paris',       lat: 48.8566,  lon: 2.3522,   country: 'France' },
+    { name: 'Dubai',       lat: 25.2048,  lon: 55.2708,  country: 'UAE' },
+    { name: 'Singapore',   lat: 1.3521,   lon: 103.8198, country: 'Singapore' },
+    { name: 'Sydney',      lat: -33.8688, lon: 151.2093, country: 'Australia' },
+    { name: 'Beijing',     lat: 39.9042,  lon: 116.4074, country: 'China' },
+    { name: 'Mumbai',      lat: 19.0760,  lon: 72.8777,  country: 'India' },
+    { name: 'Cape Town',   lat: -33.9249, lon: 18.4241,  country: 'South Africa' }
+];
+
+async function loadOverworldData() {
+    console.log('%c🌍 [Overworld] Fetching Global AQI...', 'color:#00b4ff;font-weight:bold');
+    
+    var grid = document.getElementById('worldCityGrid');
+    var map  = document.getElementById('worldMap');
+    if (!grid || !map) return;
+
+    // Clear loading state
+    grid.innerHTML = '';
+    
+    // Clear old markers (except overlay)
+    var oldMarkers = map.querySelectorAll('.ow-marker');
+    oldMarkers.forEach(function(m){ m.remove(); });
+
+    var totalAQI = 0;
+    var cleanest = { aqi: 999, name: '--' };
+    var hotspot  = { aqi: 0,   name: '--' };
+    var count    = 0;
+
+    // Fetch data for all world cities in parallel
+    var promises = WORLD_CITIES.map(function(city) {
+        return api.fetchCityAQI(city.lat, city.lon, city.name)
+            .then(function(comp) {
+                if (!comp) return null;
+                var aqi = api.pm25ToAQI(comp.pm2_5 || comp.pm25 || 0);
+                return { city: city, aqi: aqi };
+            })
+            .catch(function() { return null; });
+    });
+
+    var results = await Promise.all(promises);
+
+    results.forEach(function(res) {
+        if (!res) return;
+        count++;
+        totalAQI += res.aqi;
+
+        if (res.aqi < cleanest.aqi) cleanest = { aqi: res.aqi, name: res.city.name };
+        if (res.aqi > hotspot.aqi)  hotspot  = { aqi: res.aqi, name: res.city.name };
+
+        // 1. Update Grid Card
+        var cat = api.getCat(res.aqi);
+        var card = document.createElement('div');
+        card.className = 'cc-card';
+        card.style.borderLeftColor = cat.color;
+        card.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                <div class="cc-name">${sanitize(res.city.name)} <span style="font-size:0.6rem;color:var(--txt3)">${sanitize(res.city.country)}</span></div>
+                <div class="cc-aqi" style="color:${cat.color}">${res.aqi}</div>
+            </div>
+            <div class="cc-bar-wrap"><div class="cc-bar" style="width:${Math.min(100, (res.aqi/300)*100)}%;background:${cat.color}"></div></div>
+            <div class="cc-status" style="color:${cat.color}">${cat.label}</div>
+        `;
+        card.style.cursor = 'pointer';
+        card.onclick = function() {
+            LAT = res.city.lat;
+            LON = res.city.lon;
+            document.getElementById('citySearch').value = res.city.name;
+            toast('Exploring ' + res.city.name + '...', 'info');
+            loadAll();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+        grid.appendChild(card);
+
+        // 2. Add Map Marker
+        var top  = 50 - (res.city.lat * 0.8);
+        var left = 50 + (res.city.lon * 0.4);
+        
+        var marker = document.createElement('div');
+        marker.className = 'ow-marker';
+        marker.style.top = Math.max(10, Math.min(90, top)) + '%';
+        marker.style.left = Math.max(5, Math.min(95, left)) + '%';
+        marker.style.background = cat.color;
+        marker.style.setProperty('--accent', cat.color);
+        marker.title = res.city.name + ': ' + res.aqi + ' AQI';
+        
+        marker.onclick = function() {
+            LAT = res.city.lat;
+            LON = res.city.lon;
+            document.getElementById('citySearch').value = res.city.name;
+            toast('Exploring ' + res.city.name + '...', 'info');
+            loadAll();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        map.appendChild(marker);
+    });
+
+    // Update Global Stats
+    if (count > 0) {
+        var avg = Math.round(totalAQI / count);
+        anim('worldAvgAQI', avg);
+        var ce = document.getElementById('worldCleanest');
+        if (ce) ce.textContent = cleanest.name + ' (' + cleanest.aqi + ')';
+        var he = document.getElementById('worldHotspot');
+        if (he) he.textContent = hotspot.name + ' (' + hotspot.aqi + ')';
+    }
+}
+
+/* ============================================================
+   USE DEMO DATA (Fallback Engine)
+   ============================================================ */
+function useDemo() {
+    console.log('🏗️ [Demo] Building Realistic Environment...');
+    
+    // 1. Realistic Pollution
+    var poll = {
+        aqi: 72,
+        aqi_label: 'Moderate',
+        aqi_color: '#ffff00',
+        pm2_5: 22.5,
+        pm10: 45.2,
+        no2: 12.8,
+        o3: 38.4,
+        co: 450,
+        so2: 5.2,
+        dominant: 'PM2.5',
+        status: 'success',
+        source: 'Demo'
+    };
+    
+    // 2. Realistic Weather
+    var weather = {
+        city: 'New Delhi (Demo)',
+        country: 'IN',
+        temp: 28,
+        humidity: 45,
+        wind_speed: 3.2,
+        weather: 'Clear Skies',
+        icon: '01d',
+        status: 'success'
+    };
+    
+    // 3. Realistic Forecast
+    var forecast = Array.from({length: 24}, (x, i) => ({
+        timestamp: (Date.now()/1000) + (i * 3600),
+        aqi: 60 + Math.random() * 40,
+        pm2_5: 20 + Math.random() * 10,
+        pm10: 40 + Math.random() * 15,
+        hour_label: (i + 1) + 'h'
+    }));
+
+    updateLeft(poll);
+    updatePollCards(poll);
+    updateWeather(weather);
+    forecastData = normaliseForecast(forecast);
+    buildChart(forecastData, 'pm25');
+    
+    // Sync Top Chart
+    setTimeout(function() {
+        var labels = forecast.map(function(x) { return x.hour_label; });
+        var pm25 = forecast.map(function(x) { return x.pm2_5; });
+        var pm10 = forecast.map(function(x) { return x.pm10; });
+        if (typeof charts !== 'undefined') charts.compare(labels, pm25, pm10);
+    }, 100);
+
+    toast('💡 Running in Demo Mode', 'info');
 }

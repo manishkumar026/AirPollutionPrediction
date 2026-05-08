@@ -15,6 +15,11 @@ var charts = (function () {
         var canvas = document.getElementById('trendChart');
         if (!canvas) return;
 
+        if (!labels || !labels.length) {
+            console.warn('[Charts] No labels for trend chart');
+            return;
+        }
+
         lineColor = lineColor || '#00b4ff';
 
         /* Destroy existing */
@@ -46,24 +51,56 @@ var charts = (function () {
                     type       : 'line',
                     yMin       : z.y,
                     yMax       : z.y,
-                    borderColor: z.color + '44',
+                    borderColor: z.color + '22',
                     borderWidth: 1,
                     borderDash : [4, 4],
                     label      : {
                         display   : true,
                         content   : z.label,
                         position  : 'end',
-                        color     : z.color + 'aa',
-                        font      : { size: 9 },
-                        backgroundColor: 'transparent',
-                        padding   : 2,
+                        color     : z.color + '88',
+                        font      : { size: 8 },
+                        backgroundColor: 'transparent'
                     },
                 };
             });
+
+            /* NEW: Peak & Low Tagging */
+            var maxVal = Math.max.apply(null, values);
+            var minVal = Math.min.apply(null, values);
+            var maxIdx = values.indexOf(maxVal);
+            var minIdx = values.indexOf(minVal);
+
+            annotations['peakTag'] = {
+                type: 'label',
+                xValue: labels[maxIdx],
+                yValue: maxVal,
+                backgroundColor: 'rgba(255, 51, 102, 0.9)',
+                content: ['▲ PEAK', maxVal],
+                color: '#fff',
+                font: { size: 10, weight: 'bold' },
+                padding: 4,
+                borderRadius: 4,
+                position: 'top'
+            };
+
+            annotations['lowTag'] = {
+                type: 'label',
+                xValue: labels[minIdx],
+                yValue: minVal,
+                backgroundColor: 'rgba(0, 255, 136, 0.9)',
+                content: ['▼ BEST', minVal],
+                color: '#fff',
+                font: { size: 10, weight: 'bold' },
+                padding: 4,
+                borderRadius: 4,
+                position: 'bottom'
+            };
         }
 
         trendChart = new Chart(canvas, {
             type : 'line',
+            plugins: typeof ChartDataLabels !== 'undefined' ? [ChartDataLabels] : [],
             data : {
                 labels   : labels,
                 datasets : [{
@@ -91,6 +128,17 @@ var charts = (function () {
                     annotation: {
                         annotations: annotations
                     },
+                    /* NEW: Custom Plugin to show values over points */
+                    datalabels: {
+                        display: function(ctx) {
+                            return ctx.dataIndex % 2 === 0; // Show every 2nd point to avoid crowding
+                        },
+                        align: 'top',
+                        offset: 4,
+                        color: lineColor,
+                        font: { size: 10, weight: 'bold' },
+                        formatter: function(value) { return value; }
+                    },
                     tooltip: {
                         backgroundColor  : 'rgba(8,12,25,0.95)',
                         titleColor       : 'rgba(255,255,255,0.9)',
@@ -105,9 +153,9 @@ var charts = (function () {
                             label : function(ctx) {
                                 var val = ctx.raw;
                                 if (label.includes('AQI')) {
-                                    return 'AQI: ' + val + '  |  ' + getAQILabel(val);
+                                    return '24-Hour Trend: ' + val + '  |  ' + getAQILabel(val);
                                 }
-                                return label + ': ' + val;
+                                return '24-Hour Trend: ' + val;
                             },
                         },
                     },
@@ -207,10 +255,208 @@ var charts = (function () {
         });
     }
 
+    /* ============================================================
+       COMPARISON CHART - PM2.5 vs PM10 Area Chart
+       ============================================================ */
+    var compareChart = null;
+    function compare(labels, pm25, pm10) {
+        var canvas = document.getElementById('compareChart');
+        if (!canvas) return;
+        
+        // Safety: Prevent crash on empty data
+        if (!labels || !labels.length) {
+            console.warn('[Charts] No labels for comparison chart');
+            return;
+        }
+
+        if (compareChart) {
+            compareChart.destroy();
+            compareChart = null;
+        }
+
+        var ctx = canvas.getContext('2d');
+        
+        // Gradients
+        var g25 = ctx.createLinearGradient(0, 0, 0, 400);
+        g25.addColorStop(0, 'rgba(0, 180, 255, 0.3)');
+        g25.addColorStop(1, 'rgba(0, 180, 255, 0)');
+
+        var g10 = ctx.createLinearGradient(0, 0, 0, 400);
+        g10.addColorStop(0, 'rgba(0, 255, 136, 0.2)');
+        g10.addColorStop(1, 'rgba(0, 255, 136, 0)');
+
+        compareChart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'PM2.5',
+                        data: pm25,
+                        borderColor: '#00b4ff',
+                        backgroundColor: g25,
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'PM10',
+                        data: pm10,
+                        borderColor: '#00ff88',
+                        backgroundColor: g10,
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        align: 'end',
+                        labels: { color: 'rgba(255,255,255,0.7)', usePointStyle: true, boxWidth: 6, font: { size: 10 } }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(8,12,25,0.95)',
+                        padding: 12,
+                        cornerRadius: 8,
+                        titleFont: { size: 12 }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 }, maxTicksLimit: 12 } },
+                    y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } }, beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    /* ============================================================
+       HEATMAP - Spectral intensity map
+       ============================================================ */
+    function heatmap(canvasId, data) {
+        var canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+
+        var ctx = canvas.getContext('2d');
+        var w = canvas.width;
+        var h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        if (!data || !data.length) {
+            // Fallback data if empty to ensure canvas has content
+            data = Array.from({ length: 24 }, function (_, i) {
+                var hour = (new Date().getHours() + i) % 24;
+                var ampm = hour >= 12 ? 'PM' : 'AM';
+                var hour12 = hour % 12 || 12;
+                return { 
+                    aqi: 30 + Math.random() * 150, 
+                    hour_label: hour12 + ' ' + ampm 
+                };
+            });
+        }
+
+        var paddingLeft = 40; // Space for Y-axis labels
+        var paddingBottom = 30; // Space for X-axis labels
+        var paddingTop = 20; // Space for top padding
+        
+        var chartWidth = w - paddingLeft - 20;
+        var chartHeight = h - paddingBottom - paddingTop;
+
+        var maxAqi = Math.max.apply(null, data.map(function(d) { return d.aqi || 50; })) || 200;
+        maxAqi = Math.max(maxAqi, 200); // Scale up to at least 200 to match image style
+        
+        // --- DRAW GRID LINES ---
+        var gridLines = [0, 50, 100, 150, 200];
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = '10px Space Grotesk';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+
+        gridLines.forEach(function(val) {
+            var y = paddingTop + chartHeight - (val / maxAqi) * chartHeight;
+            
+            // Draw line
+            ctx.beginPath();
+            ctx.moveTo(paddingLeft, y);
+            ctx.lineTo(paddingLeft + chartWidth, y);
+            ctx.stroke();
+            
+            // Draw label
+            ctx.fillText(val, paddingLeft - 5, y);
+        });
+
+        // --- DRAW BARS ---
+        var barWidth = (chartWidth / data.length) - 1; // 1px gap
+        if (barWidth < 1) barWidth = 1;
+
+        ctx.textAlign = 'center';
+        
+        data.forEach(function (d, i) {
+            var aqi = d.aqi || 0;
+            
+            // Get color from AQI
+            var color = '#00e400'; // Good
+            if (aqi > 50)  color = '#ffff00'; // Moderate
+            if (aqi > 100) color = '#ff7e00'; // USG
+            if (aqi > 150) color = '#ff0000'; // Unhealthy
+            if (aqi > 200) color = '#8f3f97'; // Very Unhealthy
+            if (aqi > 300) color = '#7e0023'; // Hazardous
+
+            var barHeight = (aqi / maxAqi) * chartHeight;
+            if (barHeight < 2) barHeight = 2; // Min height
+
+            var x = paddingLeft + i * (chartWidth / data.length);
+            var y = paddingTop + chartHeight - barHeight;
+
+            // Draw bar (Rectangle, no rounded corners)
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, barWidth, barHeight);
+
+            // Time Label (every 3 hours)
+            if (i % 3 === 0) {
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.font = '9px Space Grotesk';
+                ctx.fillText(d.hour_label || '', x + barWidth / 2, h - 10);
+            }
+        });
+    }
+
+    function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+        if (typeof radius === 'number') {
+            radius = {tl: radius, tr: radius, br: radius, bl: radius};
+        }
+        ctx.beginPath();
+        ctx.moveTo(x + radius.tl, y);
+        ctx.lineTo(x + width - radius.tr, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius.tr);
+        ctx.lineTo(x + width, y + height - radius.br);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius.br, y + height);
+        ctx.lineTo(x + radius.bl, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius.bl);
+        ctx.lineTo(x, y + radius.tl);
+        ctx.quadraticCurveTo(x, y, x + radius.tl, y);
+        ctx.closePath();
+        if (fill) ctx.fill();
+        if (stroke) ctx.stroke();
+    }
+
     return {
         trend     : trend,
+        compare   : compare,
         sparkline : sparkline,
         gauge     : gauge,
+        heatmap   : heatmap,
     };
 
 })();

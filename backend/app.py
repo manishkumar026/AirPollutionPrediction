@@ -1,20 +1,18 @@
 # ================================================
-# FLASK SERVER - AIRWATCH PRO (MONGODB VERSION)
+# FLASK SERVER - AIRWATCH PRO (MYSQL / XAMPP VERSION)
 # ================================================
 
 from flask import Flask, jsonify, request, send_from_directory, session, redirect, url_for, make_response
 from flask_cors import CORS
-from flask_pymongo import PyMongo
+from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from bson.objectid import ObjectId
 from datetime import datetime
 import traceback
 import sys
 import os
 import io
 import csv
-import certifi
 
 # Add backend folder to path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -32,32 +30,53 @@ app = Flask(
 app.config['SECRET_KEY'] = 'airwatch-pro-secret-key-123'
 CORS(app)
 
-# ---- DATABASE CONFIG (MongoDB) ----
-mongo_uri = os.environ.get("MONGO_URI")
-if not mongo_uri:
-    print("⚠️ Warning: MONGO_URI not found. Falling back to local MongoDB.")
-    mongo_uri = "mongodb://localhost:27017/airwatch"
+# ---- DATABASE CONFIG (PostgreSQL / MySQL with SQLite Fallback) ----
+database_url = os.environ.get("DATABASE_URL")
+mysql_uri = os.environ.get("MYSQL_URI", 'mysql+pymysql://root:@localhost/airwatch')
 
-app.config["MONGO_URI"] = mongo_uri
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Using certifi to fix SSL handshake errors common with MongoDB Atlas
-try:
-    mongo = PyMongo(app, tlsCAFile=certifi.where(), tlsAllowInvalidCertificates=True)
-    # If the user forgot to put a database name in the URI (e.g. /airwatch), mongo.db will be None.
-    if mongo.db is None:
-        mongo.db = mongo.cx["airwatch"]
-    print("✅ Successfully connected to MongoDB!")
-except Exception as e:
-    print(f"❌ MongoDB connection error: {e}")
-    mongo = None
+# Fix Render's postgres:// prefix issue for SQLAlchemy
+if database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
 
-# ---- MODELS (MongoDB wrappers) ----
-class User(UserMixin):
-    def __init__(self, user_data):
-        self.id = str(user_data["_id"])
-        self.username = user_data["username"]
-        self.password = user_data["password"]
-        self.is_admin = user_data.get("is_admin", False)
+def check_db_connection(uri):
+    try:
+        from sqlalchemy import create_engine
+        engine = create_engine(uri, connect_args={'connect_timeout': 2})
+        with engine.connect() as conn:
+            return True
+    except:
+        return False
+
+if database_url and check_db_connection(database_url):
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    print("✅ PostgreSQL Connection Verified")
+elif check_db_connection(mysql_uri):
+    app.config['SQLALCHEMY_DATABASE_URI'] = mysql_uri
+    print("✅ MySQL Connection Verified")
+else:
+    print("⚠️ DB Connection Failed. Switching to SQLite fallback...")
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///airwatch_fallback.db'
+
+db = SQLAlchemy(app)
+
+# ---- MODELS ----
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class SearchLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), nullable=False)
+    city = db.Column(db.String(100), nullable=False)
+    lat = db.Column(db.Float)
+    lon = db.Column(db.Float)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
 
 # ---- AUTH SETUP ----
 login_manager = LoginManager()
@@ -66,24 +85,25 @@ login_manager.login_view = 'login_page'
 
 @login_manager.user_loader
 def load_user(user_id):
-    if mongo:
-        u = mongo.db.users.find_one({"_id": ObjectId(user_id)})
-        if u: return User(u)
-    return None
+    return User.query.get(int(user_id))
 
-# Create default admin if it doesn't exist
+# Create tables and default admin
 with app.app_context():
-    if mongo:
-        admin_exists = mongo.db.users.find_one({"username": "admin"})
-        if not admin_exists:
-            mongo.db.users.insert_one({
-                "username": "admin",
-                "password": generate_password_hash("admin123"),
-                "is_admin": True,
-                "created_at": datetime.utcnow()
-            })
-            print("👤 Default admin user created.")
-
+    try:
+        db.create_all()
+        if not User.query.filter_by(username='admin').first():
+            admin = User(
+                username='admin',
+                password=generate_password_hash('admin123'),
+                is_admin=True
+            )
+            db.session.add(admin)
+            db.session.commit()
+            print("👤 Default admin user created in MySQL.")
+    except Exception as e:
+        print(f"❌ MySQL connection error: {e}")
+        print("⚠️ Did you remember to start MySQL in XAMPP and create the 'airwatch' database in phpMyAdmin?")
+        
 # ---- CREATE INSTANCES ----
 fetcher   = PollutionDataFetcher()
 predictor = AQIPredictor()
@@ -94,31 +114,33 @@ predictor = AQIPredictor()
 
 @app.route("/api/register", methods=["POST"])
 def register():
-    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
-    
-    data = request.json
-    if mongo.db.users.find_one({"username": data['username']}):
-        return jsonify({"status": "error", "message": "Username already exists"}), 400
-    
-    mongo.db.users.insert_one({
-        "username": data['username'],
-        "password": generate_password_hash(data['password']),
-        "is_admin": False,
-        "created_at": datetime.utcnow()
-    })
-    return jsonify({"status": "success", "message": "User registered"})
+    try:
+        data = request.json
+        if User.query.filter_by(username=data['username']).first():
+            return jsonify({"status": "error", "message": "Username already exists"}), 400
+        
+        new_user = User(
+            username=data['username'],
+            password=generate_password_hash(data['password']),
+            is_admin=False
+        )
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "User registered"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Database error: {e}"}), 500
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
-    
-    data = request.json
-    u_data = mongo.db.users.find_one({"username": data['username']})
-    if u_data and check_password_hash(u_data['password'], data['password']):
-        user = User(u_data)
-        login_user(user)
-        return jsonify({"status": "success", "user": {"username": user.username, "is_admin": user.is_admin}})
-    return jsonify({"status": "error", "message": "Invalid credentials"}), 401
+    try:
+        data = request.json
+        user = User.query.filter_by(username=data['username']).first()
+        if user and check_password_hash(user.password, data['password']):
+            login_user(user)
+            return jsonify({"status": "success", "user": {"username": user.username, "is_admin": user.is_admin}})
+        return jsonify({"status": "error", "message": "Invalid credentials"}), 401
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Database error: {e}"}), 500
 
 @app.route("/api/logout")
 @login_required
@@ -135,38 +157,59 @@ def user_status():
 @app.route("/api/log_search", methods=["POST"])
 @login_required
 def log_search():
-    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
-    
-    data = request.json
-    mongo.db.search_logs.insert_one({
-        "user_id": current_user.id,
-        "username": current_user.username,
-        "city": data.get('city', 'Unknown'),
-        "lat": data.get('lat'),
-        "lon": data.get('lon'),
-        "timestamp": datetime.utcnow()
-    })
-    return jsonify({"status": "success"})
+    try:
+        data = request.json
+        new_log = SearchLog(
+            user_id=current_user.id,
+            username=current_user.username,
+            city=data.get('city', 'Unknown'),
+            lat=data.get('lat'),
+            lon=data.get('lon')
+        )
+        db.session.add(new_log)
+        db.session.commit()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Database error: {e}"}), 500
 
 @app.route("/api/admin/logs")
 @login_required
 def export_logs():
     if not current_user.is_admin:
         return jsonify({"status": "error", "message": "Unauthorized"}), 403
-    if not mongo: return jsonify({"status": "error", "message": "Database not connected"}), 500
     
-    logs = mongo.db.search_logs.find()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['ID', 'Username', 'City', 'Lat', 'Lon', 'Timestamp'])
+    try:
+        logs = SearchLog.query.all()
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['ID', 'Username', 'City', 'Lat', 'Lon', 'Timestamp'])
+        
+        for log in logs:
+            writer.writerow([log.id, log.username, log.city, log.lat, log.lon, log.timestamp])
+        
+        response = make_response(output.getvalue())
+        response.headers["Content-Disposition"] = "attachment; filename=search_logs_mysql.csv"
+        response.headers["Content-type"] = "text/csv"
+        return response
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Database error: {e}"}), 500
+
+@app.route("/api/admin/recent_searches")
+@login_required
+def recent_searches():
+    if not current_user.is_admin:
+        return jsonify({"status": "error", "message": "Unauthorized"}), 403
     
-    for log in logs:
-        writer.writerow([str(log.get('_id')), log.get('username'), log.get('city'), log.get('lat'), log.get('lon'), log.get('timestamp')])
-    
-    response = make_response(output.getvalue())
-    response.headers["Content-Disposition"] = "attachment; filename=search_logs_mongo.csv"
-    response.headers["Content-type"] = "text/csv"
-    return response
+    try:
+        logs = SearchLog.query.order_by(SearchLog.timestamp.desc()).limit(20).all()
+        data = [{
+            "username": log.username,
+            "city": log.city,
+            "timestamp": log.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        } for log in logs]
+        return jsonify({"status": "success", "logs": data})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Database error: {e}"}), 500
 
 # ================================================
 # STATIC & DASHBOARD ROUTES
@@ -231,8 +274,107 @@ def js_files(filename): return send_from_directory("../frontend/js", filename)
 @app.route("/css/<path:filename>")
 def css_files(filename): return send_from_directory("../frontend/css", filename)
 
+@app.route("/data/<path:filename>")
+def data_files(filename): return send_from_directory("../frontend/data", filename)
+
+# ================================================
+# INDIVIDUAL API ROUTES (used by frontend fetchAll)
+# ================================================
+
+@app.route("/api/pollution")
+def api_pollution():
+    try:
+        lat = float(request.args.get("lat", DEFAULT_LAT))
+        lon = float(request.args.get("lon", DEFAULT_LON))
+        data = fetcher.get_current_pollution(lat, lon)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/weather")
+def api_weather():
+    try:
+        lat = float(request.args.get("lat", DEFAULT_LAT))
+        lon = float(request.args.get("lon", DEFAULT_LON))
+        data = fetcher.get_weather_data(lat, lon)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/forecast")
+def api_forecast():
+    try:
+        lat = float(request.args.get("lat", DEFAULT_LAT))
+        lon = float(request.args.get("lon", DEFAULT_LON))
+        data = fetcher.get_pollution_forecast(lat, lon)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/city-aqi")
+def api_city_aqi():
+    try:
+        lat  = float(request.args.get("lat", DEFAULT_LAT))
+        lon  = float(request.args.get("lon", DEFAULT_LON))
+
+        # Try WAQI first for most accurate data
+        waqi = fetcher.get_waqi_aqi(lat, lon)
+        if waqi.get("status") == "success":
+            return jsonify({
+                "status":       "success",
+                "aqi":          waqi["aqi"],
+                "pm2_5":        waqi.get("pm2_5"),
+                "pm10":         waqi.get("pm10"),
+                "no2":          waqi.get("no2"),
+                "o3":           waqi.get("o3"),
+                "so2":          waqi.get("so2"),
+                "co":           waqi.get("co"),
+                "source":       "WAQI",
+                "official_aqi": waqi["aqi"],
+                "use_official": True,
+            })
+
+        # Fallback: OpenWeatherMap
+        poll = fetcher.get_current_pollution(lat, lon)
+        if poll.get("status") == "success":
+            return jsonify({
+                "status": "success",
+                "pm2_5":  poll.get("pm2_5", 0),
+                "pm10":   poll.get("pm10",  0),
+                "no2":    poll.get("no2",   0),
+                "o3":     poll.get("o3",    0),
+                "so2":    poll.get("so2",   0),
+                "co":     poll.get("co",    0),
+                "source": "OWM",
+                "use_official": False,
+            })
+
+        return jsonify({"status": "error", "message": "No data available"}), 500
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/api/geocode")
+def api_geocode():
+    try:
+        q = request.args.get("q", "")
+        if not q:
+            return jsonify([])
+        data = fetcher.geocode_city(q)
+        if data.get("status") == "success":
+            return jsonify(data.get("results", []))
+        return jsonify([])
+    except Exception as e:
+        return jsonify([]), 500
+
 # ================================================
 # RUN SERVER
 # ================================================
 if __name__ == "__main__":
-    app.run(debug=DEBUG, host=HOST, port=PORT)
+    try:
+        app.run(debug=DEBUG, host=HOST, port=PORT)
+    except OSError as e:
+        if "address already in use" in str(e).lower():
+            print(f"⚠️ Port {PORT} is busy, trying {PORT + 1}...")
+            app.run(debug=DEBUG, host=HOST, port=PORT + 1)
+        else:
+            raise e

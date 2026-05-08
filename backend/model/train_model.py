@@ -8,8 +8,9 @@ import os
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, AdaBoostRegressor
-from sklearn.linear_model import Ridge
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, StackingRegressor
+from xgboost import XGBRegressor
+from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score
@@ -80,49 +81,48 @@ class MultiModelTrainer:
         return pd.DataFrame(X, columns=self.FEATURES), y
 
     def train(self):
-        print("🚀 Training AirWatch Pro ensemble...")
+        print("🚀 Training AirWatch Pro SUPER-ENSEMBLE (Stacking + XGBoost)...")
         X_df, y = self.make_data()
         
         X_scaled = self.scaler.fit_transform(X_df)
         X_scaled_df = pd.DataFrame(X_scaled, columns=self.FEATURES)
         
         X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled_df, y, test_size=0.2, random_state=self.random_state
+            X_scaled_df, y, test_size=0.15, random_state=self.random_state
         )
 
-        models_to_train = {
-            "gradient_boosting": GradientBoostingRegressor(
-                n_estimators=250, learning_rate=0.08, max_depth=5,
-                subsample=0.8, random_state=self.random_state
-            ),
-            "random_forest": RandomForestRegressor(
-                n_estimators=250, max_depth=12, min_samples_split=5,
-                random_state=self.random_state, n_jobs=-1
-            ),
-            "adaboost": AdaBoostRegressor(
-                n_estimators=150, learning_rate=0.05,
-                loss="square", random_state=self.random_state
-            ),
-            "ridge": Ridge(alpha=2.0)
-        }
+        # Base Estimators
+        estimators = [
+            ("rf", RandomForestRegressor(n_estimators=300, max_depth=15, random_state=self.random_state, n_jobs=-1)),
+            ("gb", GradientBoostingRegressor(n_estimators=300, learning_rate=0.05, max_depth=6, random_state=self.random_state)),
+            ("xgb", XGBRegressor(n_estimators=300, learning_rate=0.05, max_depth=7, objective='reg:squarederror', random_state=self.random_state))
+        ]
 
-        for name, mdl in models_to_train.items():
-            print(f"  Training {name} ...")
-            mdl.fit(X_train, y_train)
-            preds = mdl.predict(X_test)
-            rmse = np.sqrt(mean_squared_error(y_test, preds))
-            r2   = r2_score(y_test, preds)
-            print(f"    RMSE={rmse:.2f}  R²={r2:.4f}")
-            self.models[name] = mdl
+        # Meta-Learner (RidgeCV automatically finds the best regularization)
+        self.stacking_model = StackingRegressor(
+            estimators=estimators,
+            final_estimator=RidgeCV(),
+            cv=5,
+            n_jobs=-1
+        )
 
-        # Save files
-        models_path = os.path.join(self.base_dir, "multi_models.pkl")
-        scaler_path = os.path.join(self.base_dir, "scaler.pkl")
-        weights_path = os.path.join(self.base_dir, "weights.pkl")
+        print("  Fitting Stacking Regressor (this may take a moment)...")
+        self.stacking_model.fit(X_train, y_train)
         
-        joblib.dump(self.models, models_path)
+        preds = self.stacking_model.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, preds))
+        r2   = r2_score(y_test, preds)
+        
+        print(f"\n✨ STACKING RESULTS:")
+        print(f"   Overall RMSE: {rmse:.2f}")
+        print(f"   Final Accuracy (R²): {r2:.4f}")
+        
+        # Save files
+        models_path = os.path.join(self.base_dir, "stacking_model.pkl")
+        scaler_path = os.path.join(self.base_dir, "scaler.pkl")
+        
+        joblib.dump(self.stacking_model, models_path)
         joblib.dump(self.scaler, scaler_path)
-        joblib.dump(self.weights, weights_path)
 
         size_kb = os.path.getsize(models_path) / 1024
         print(f"\n✅ Saved {models_path} ({size_kb:.1f} KB)")

@@ -19,7 +19,7 @@ var liveLocation = (function() {
         if (!btn) return;
         
         btn.classList.add('loading');
-        toast.show('Fetching your location...', 'info');
+        toast('Fetching your location...', 'info');
         
         navigator.geolocation.getCurrentPosition(
             function(position) {
@@ -33,7 +33,7 @@ var liveLocation = (function() {
                 showBanner(coords.lat, coords.lon);
                 loadData(coords.lat, coords.lon);
                 
-                toast.show('Live location detected!', 'success');
+                toast('📍 Live location detected!', 'success');
             },
             function(error) {
                 btn.classList.remove('loading');
@@ -41,7 +41,7 @@ var liveLocation = (function() {
                 if (error.code === 1) msg = 'Please enable location permissions';
                 if (error.code === 2) msg = 'Location unavailable';
                 if (error.code === 3) msg = 'Location timeout';
-                toast.show(msg, 'error');
+                toast(msg, 'error');
             },
             {
                 enableHighAccuracy: true,
@@ -100,22 +100,14 @@ var liveLocation = (function() {
     }
     
     async function loadData(lat, lon) {
-        loader.show();
-        
         try {
-            var result = await api.fetchAll(lat, lon);
-            
-            if (result.source === 'direct' && result.p && result.w) {
-                updateUI(result.p, result.w, result.f);
-                toast.show('Live data loaded successfully!', 'success');
-            } else {
-                toast.show('Failed to load live data', 'error');
-            }
+            // Update global coordinates so loadAll() uses correct position
+            LAT = lat;
+            LON = lon;
+            loadAll();  // uses global LAT/LON and handles all UI updates
         } catch (err) {
             console.error('[LiveLocation] Load error:', err);
-            toast.show('Error loading data', 'error');
-        } finally {
-            loader.hide();
+            toast('Error loading data', 'error');
         }
     }
     

@@ -174,9 +174,11 @@ class PollutionDataFetcher:
     # --------------------------------------------------
     def geocode_city(self, city_name):
         try:
+            # Removed the India restriction. Allow global searches.
+            search_query = city_name
             url  = (
                 f"{OPENWEATHER_GEOCODING_URL}"
-                f"?q={city_name}&limit=5&appid={self.api_key}"
+                f"?q={search_query}&limit=10&appid={self.api_key}"
             )
             resp = self.session.get(url, timeout=10)
             data = resp.json()
@@ -190,8 +192,11 @@ class PollutionDataFetcher:
                         "state":   loc.get("state", ""),
                         "lat":     round(loc["lat"], 4),
                         "lon":     round(loc["lon"], 4),
+                        "isIndian": loc.get("country") == "IN" # Keep this flag for frontend UI categorization
                     })
-                return {"status": "success", "results": results}
+                
+                if results:
+                    return {"status": "success", "results": results}
 
             return {"status": "error", "message": "City not found"}
 

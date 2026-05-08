@@ -20,7 +20,7 @@ var autocomplete = (function() {
             var query = e.target.value.trim();
             selectedIndex = -1;
             
-            if (query.length < 2) {
+            if (query.length < 1) {
                 dropdown.innerHTML = '';
                 dropdown.classList.remove('show');
                 return;
@@ -32,7 +32,7 @@ var autocomplete = (function() {
         });
         
         input.addEventListener('focus', function() {
-            if (input.value.trim().length >= 2) {
+            if (input.value.trim().length >= 1) {
                 search(input.value.trim());
             }
         });
@@ -97,28 +97,20 @@ var autocomplete = (function() {
                 return;
             }
             
-            var html = '';
-            var maxShow = 12;
-            var hasMore = results.length > maxShow;
+            var html = '<div class="ac-items-container">';
             
-            results.slice(0, maxShow).forEach(function(city) {
+            results.forEach(function(city) {
+                var sub = [city.state, city.country].filter(Boolean).join(', ');
                 html += '<div class="ac-item" onclick="selectCity(\'' 
-                    + city.name + '\', ' + city.lat + ', ' + city.lon + ')">';
-                html += '<i class="fas fa-map-marker-alt"></i>';
+                    + city.name.replace(/'/g, "\\'") + '\', ' + city.lat + ', ' + city.lon + ')">';
                 html += '<div>';
                 html += '<div class="ac-name">' + city.name + '</div>';
-                html += '<div class="ac-country">' + city.display + '</div>';
+                html += '<div class="ac-country">' + (sub || city.country || '') + '</div>';
                 html += '</div>';
-                html += '<i class="fas fa-arrow-right ac-arrow"></i>';
                 html += '</div>';
             });
             
-            if (hasMore) {
-                html += '<div class="ac-scroll-hint">';
-                html += '<i class="fas fa-chevron-down"></i>';
-                html += 'Scroll for ' + (results.length - maxShow) + ' more cities';
-                html += '</div>';
-            }
+            html += '</div>';
             
             dropdown.innerHTML = html;
             dropdown.classList.add('show');
@@ -143,16 +135,12 @@ function selectCity(name, lat, lon) {
     if (input) input.value = name;
     if (dropdown) dropdown.classList.remove('show');
     
-    // Load data using live location module
-    setTimeout(function() {
-        loader.show();
-        api.fetchAll(lat, lon).then(function(result) {
-            if (result.source === 'direct' && result.p && result.w) {
-                liveLocation.updateUI(result.p, result.w, result.f);
-            }
-            loader.hide();
-        });
-    }, 100);
+    // Update global coordinates and reload dashboard
+    LAT = parseFloat(lat);
+    LON = parseFloat(lon);
+    
+    toast('📍 Loading data for ' + name + '...', 'info');
+    loadAll();
 }
 
 // Initialize

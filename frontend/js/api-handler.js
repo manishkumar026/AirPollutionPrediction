@@ -15,6 +15,9 @@ var api = (function () {
     /* ── IQAir Token (Real-time AQI) ────────────────────────── */
     var IQAIR_KEY = '27636e29836f490fbc7f01b3871d8b8e';
 
+    /* ── WAQI Token (CPCB Official India) ───────────────────── */
+    var WAQI_TOKEN = 'c12943ab88ad31947b8aaf9568a9633988c61ce7';
+
     /* ── OWM Endpoints ──────────────────────────────────────── */
     var URL_AIR = 'https://api.openweathermap.org/data/2.5/air_pollution';
     var URL_FORECAST = 'https://api.openweathermap.org/data/2.5/air_pollution/forecast';
@@ -43,8 +46,7 @@ var api = (function () {
 
     function keyOk() {
         return typeof OWM_KEY === 'string'
-            && OWM_KEY.trim().length >= 20
-            && OWM_KEY !== '1cc153b8da9c132a0ede08d220b59a6';
+            && OWM_KEY.trim().length >= 20;
     }
 
     /* ============================================================
@@ -182,126 +184,54 @@ var api = (function () {
     }
 
     /* ============================================================
-       FETCH ALL - Main entry point
+       FETCH CITY AQI - used by city comparison & world overworld
        ============================================================ */
-    async function fetchAll(lat, lon) {
-        // --- STEP 0: TRY BACKEND FIRST (MOST RELIABLE) ---
+    async function fetchCityAQI(lat, lon, cityName) {
         try {
-            const response = await fetch(`/api/dashboard-data?lat=${lat}&lon=${lon}`);
-            const data = await response.json();
-
-            if (data.status === 'success') {
-                console.log('%c[API] Backend Data Loaded Successfully', 'color:#2dd4a0;font-weight:bold');
-                return {
-                    source: 'backend',
-                    data: data
-                };
-            }
+            var url = '/api/city-aqi?lat=' + lat + '&lon=' + lon;
+            var res = await fetchT(url, 12);
+            if (!res.ok) return null;
+            var data = await safeJson(res);
+            if (!data || data.status !== 'success') return null;
+            return data;
         } catch (e) {
-            console.warn('[API] Backend fetch failed, falling back to direct API:', e.message);
+            console.warn('[API] fetchCityAQI failed for', cityName, ':', e.message);
+            return null;
         }
+    }
 
-        console.group('%c🔑 AirWatch API Status', 'color:#ff9800;font-weight:bold');
-        console.log('OWM Key   :', keyOk() ? '✅ ' + OWM_KEY.substring(0, 8) + '...' : '❌ MISSING');
-        console.log('IQAir Key :', iqairOk() ? '✅ ' + IQAIR_KEY.substring(0, 8) + '...' : '❌ MISSING');
-        console.groupEnd();
-
-        if (!keyOk()) {
-            console.warn('[API] ❌ OWM key missing or invalid');
-            return { source: 'nokey' };
-        }
-
-        /* ── Step 1: Fetch IQAir (Real-time AQI) & OWM in parallel ── */
-        var iqairPromise = iqairOk() ? fetchIQAir_NearestStation(lat, lon) : Promise.resolve(null);
-
-        var results = await Promise.allSettled([
-            fetchPollution(lat, lon),
-            fetchWeather(lat, lon),
-            fetchForecast(lat, lon),
-            iqairPromise
-        ]);
-
-        var owmPoll = results[0].status === 'fulfilled' ? results[0].value : null;
-        var w = results[1].status === 'fulfilled' ? results[1].value : null;
-        var f = results[2].status === 'fulfilled' ? results[2].value : null;
-        var iqairStation = results[3].status === 'fulfilled' ? results[3].value : null;
-
-        /* Check OWM auth errors */
-        if (results[0].status === 'rejected') {
-            var err = results[0].reason.message;
-            console.error('[OWM] Pollution failed:', err);
-            if ((err.includes('401') || err.includes('Invalid')) && !iqairStation) {
-                return { source: 'badkey' };
+    // FETCH ALL - Single dashboard-data call returns everything useBackend needs
+    async function fetchAll(lat, lon) {
+        console.log(`🌐 [API] Requesting: /api/dashboard-data for ${lat}, ${lon}`);
+        try {
+            const baseUrl = window.location.origin; // Use the current origin
+            const res = await fetch(`${baseUrl}/api/dashboard-data?lat=${lat}&lon=${lon}`);
+            console.log(`🌐 [API] Response Status: ${res.status}`);
+            if (!res.ok) {
+                return { source: 'error', message: 'Backend returned HTTP ' + res.status };
             }
-        }
-
-        /* ── Step 2: Build final poll object ── */
-        var dsEl = document.getElementById('dataSource');
-        var finalPoll = owmPoll;
-
-        // If OWM failed but IQAir worked, we can still show IQAir data!
-        if (iqairStation) {
-            DATA_SOURCE = 'IQAir (AirVisual)';
-            if (dsEl) dsEl.textContent = 'IQAir (AirVisual) Official';
-
-            if (!finalPoll) {
-                // Create a dummy poll object so the UI doesn't crash
-                finalPoll = {
-                    list: [{
-                        components: {
-                            pm2_5: 0, pm10: 0, no2: 0, o3: 0, co: 0, so2: 0
-                        }
-                    }]
-                };
+            const data = await res.json();
+            console.log(`🌐 [API] JSON Parsed. Status: ${data.status}`);
+            if (!data || data.status !== 'success') {
+                return { source: 'error', message: data && data.message || 'Backend error' };
             }
-
-            finalPoll.source = 'IQAir';
-            finalPoll.official_aqi = iqairStation.official_aqi;
-            finalPoll.waqi_station = iqairStation.station;
-            finalPoll.use_official = true;
-
-            console.log('%c✅ Using IQAir Data', 'color:#2dd4a0;font-weight:bold');
-        } else if (finalPoll) {
-            DATA_SOURCE = 'OpenWeatherMap (Satellite)';
-            if (dsEl) dsEl.textContent = 'OpenWeatherMap (Satellite)';
+            return {
+                source        : 'backend',
+                data          : data,               // full payload for useBackend()
+                waqi_available: data.waqi_available || false,
+                waqi_station  : data.waqi_station   || '',
+                waqi_official : data.pollution && data.pollution.official_aqi
+            };
+        } catch (e) {
+            console.error('[API] fetchAll error:', e.message);
+            return { source: 'error', message: e.message };
         }
-
-        if (!finalPoll && !w) {
-            console.error('[API] ❌ All APIs failed (OWM & IQAir)');
-            return { source: 'error', message: 'All requests failed' };
-        }
-
-        return {
-            source: 'direct',
-            p: finalPoll,
-            w: w,
-            f: f,
-            waqi_available: !!iqairStation,
-            waqi_official: iqairStation ? iqairStation.official_aqi : null,
-            waqi_station: iqairStation ? iqairStation.station : null,
-            data_source: DATA_SOURCE,
-        };
     }
 
     /* ============================================================
        FETCH AIR POLLUTION (OWM)
        ============================================================ */
-    async function fetchPollution(lat, lon) {
-        var url = URL_AIR
-            + '?lat=' + lat
-            + '&lon=' + lon
-            + '&appid=' + OWM_KEY;
-
-        var res = await fetchT(url, 10);
-        if (res.status === 401) throw new Error('Invalid API key (401)');
-        if (res.status === 429) throw new Error('Rate limit exceeded (429)');
-        if (res.status === 404) throw new Error('Not found (404)');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-
-        var data = await safeJson(res);
-        if (!data) throw new Error('Invalid JSON from OWM pollution');
-        return data;
-    }
+    // fetchPollution, fetchWeather, fetchForecast are no longer used (all via backend)
 
     /* ============================================================
        FETCH WEATHER (OWM)
@@ -343,63 +273,16 @@ var api = (function () {
     /* ============================================================
        FETCH CITY AQI - For comparison panel
        ============================================================ */
-    async function fetchCityAQI(lat, lon, cityName) {
-
-        // Fallback to OWM for comparison cities
-        try {
-            var data = await fetchPollution(lat, lon);
-            if (data && data.list && data.list.length > 0) {
-                return data.list[0].components;
-            }
-        } catch (e) {
-            console.warn('[OWM] City AQI failed:', e.message);
-        }
-
-        try {
-            var data = await fetchPollution(lat, lon);
-            if (data && data.list && data.list.length > 0) {
-                return data.list[0].components;
-            }
-        } catch (e) {
-            console.warn('[OWM] City AQI failed:', e.message);
-        }
-
-        return null;
-    }
+    // fetchCityAQI is deprecated; use backend endpoint if needed
 
     async function searchCities(query) {
-        if (!query || query.trim().length < 2) return [];
-
+        if (!query || query.trim().length < 1) return [];
         try {
-            var url = URL_GEO
-                + '?q=' + encodeURIComponent(query.trim())
-                + '&format=json&limit=12&addressdetails=1';
-
-            var res = await fetchT(url, 8);
+            const res = await fetch(`/api/geocode?q=${encodeURIComponent(query.trim())}`);
             if (!res.ok) return [];
-
-            var data = await safeJson(res);
+            const data = await res.json();
             if (!data || !Array.isArray(data) || !data.length) return [];
-
-            return data.map(function (c) {
-                var addr = c.address || {};
-                var countryCode = (addr.country_code || '').toLowerCase();
-
-                // Extract best name
-                var name = addr.city || addr.town || addr.village || addr.suburb || addr.hamlet || c.display_name.split(',')[0].trim();
-
-                return {
-                    name: name,
-                    display: c.display_name,
-                    country: addr.country || '',
-                    country_code: countryCode,
-                    state: addr.state || '',
-                    lat: parseFloat(c.lat),
-                    lon: parseFloat(c.lon),
-                    isIndian: countryCode === 'in',
-                };
-            });
-
+            return data;
         } catch (e) {
             console.error('[API] searchCities error:', e.message);
             return [];
@@ -662,23 +545,21 @@ var api = (function () {
        PUBLIC API
        ============================================================ */
     return {
-        fetchAll: fetchAll,
-        fetchCityAQI: fetchCityAQI,
-        searchCity: searchCity,
-        searchCities: searchCities,
-        predict: predict,
-        pm25ToAQI: pm25ToAQI,
-        pm10ToAQI: pm10ToAQI,
-        no2ToAQI: no2ToAQI,
-        o3ToAQI: o3ToAQI,
-        coToAQI: coToAQI,
-        so2ToAQI: so2ToAQI,
-        getCat: getCat,
-        getKey: getKey,
-        getSource: getSource,
-        iqairOk: iqairOk,
-        keyOk: keyOk,
-        logSearch: logSearch,
+        fetchAll     : fetchAll,
+        fetchCityAQI : fetchCityAQI,
+        searchCity   : searchCity,
+        searchCities : searchCities,
+        predict      : predict,
+        pm25ToAQI    : pm25ToAQI,
+        pm10ToAQI    : pm10ToAQI,
+        no2ToAQI     : no2ToAQI,
+        o3ToAQI      : o3ToAQI,
+        coToAQI      : coToAQI,
+        so2ToAQI     : so2ToAQI,
+        getCat       : getCat,
+        getKey       : getKey,
+        getSource    : getSource,
+        logSearch    : logSearch,
     };
 
     async function logSearch(city, lat, lon) {
