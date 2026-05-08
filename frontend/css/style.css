@@ -2539,4 +2539,15 @@ body.sky-day { background: var(--blue-sky) !important; }
 body.sky-night { background: var(--night-sky) !important; }
 body.sky-haze { background: var(--haze-sky) !important; }
 body { transition: background 2s ease-in-out; }
+
+/* --- MOBILE OPTIMIZATION (Up to 480px) --- */
+@media (max-width: 480px) {
+    .pollutant-row  { grid-template-columns: 1fr !important; }
+    .pw-fields      { grid-template-columns: 1fr !important; }
+    .city-compare   { grid-template-columns: 1fr !important; }
+    .tl-summary     { grid-template-columns: 1fr !important; }
+    .aqi-big-num    { font-size: 3rem !important; }
+    .section-title  { font-size: 1rem !important; }
+    .glass-card     { padding: 12px !important; }
+}
 
