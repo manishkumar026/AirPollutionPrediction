@@ -4,7 +4,7 @@
 ---
 
 ## 1. 🌟 Project Overview
-**AirWatch Pro** is a state-of-the-art environmental monitoring dashboard designed to provide real-time, global air quality insights. By combining live satellite data from multiple APIs with a custom-trained **Stacking Ensemble Machine Learning model**, the project offers both current observations and high-accuracy 24-hour forecasts.
+**AirWatch Pro** is a state-of-the-art environmental monitoring dashboard designed to provide real-time, global air quality insights. By combining live satellite data from multiple APIs with a custom-trained **Decision Tree Machine Learning model**, the project offers both current observations and high-accuracy 24-hour forecasts.
 
 ---
 
