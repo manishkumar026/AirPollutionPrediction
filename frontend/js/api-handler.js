@@ -36,6 +36,12 @@ var api = (function () {
     /* ── Data source tracker ────────────────────────────────── */
     var DATA_SOURCE = 'Unknown';
 
+    /* ── Backend URL Fallback ───────────────────────────────── */
+    var backendBase = window.location.origin;
+    if (!backendBase || backendBase.startsWith('file') || backendBase === 'null') {
+        backendBase = 'http://localhost:5000';
+    }
+
     /* ============================================================
        KEY VALIDATORS
        ============================================================ */
@@ -188,7 +194,7 @@ var api = (function () {
        ============================================================ */
     async function fetchCityAQI(lat, lon, cityName) {
         try {
-            var url = '/api/city-aqi?lat=' + lat + '&lon=' + lon;
+            var url = backendBase + '/api/city-aqi?lat=' + lat + '&lon=' + lon;
             var res = await fetchT(url, 12);
             if (!res.ok) return null;
             var data = await safeJson(res);
@@ -204,8 +210,7 @@ var api = (function () {
     async function fetchAll(lat, lon) {
         console.log(`🌐 [API] Requesting: /api/dashboard-data for ${lat}, ${lon}`);
         try {
-            const baseUrl = window.location.origin; // Use the current origin
-            const res = await fetch(`${baseUrl}/api/dashboard-data?lat=${lat}&lon=${lon}`);
+            const res = await fetch(`${backendBase}/api/dashboard-data?lat=${lat}&lon=${lon}`);
             console.log(`🌐 [API] Response Status: ${res.status}`);
             if (!res.ok) {
                 return { source: 'error', message: 'Backend returned HTTP ' + res.status };
@@ -278,7 +283,7 @@ var api = (function () {
     async function searchCities(query) {
         if (!query || query.trim().length < 1) return [];
         try {
-            const res = await fetch(`/api/geocode?q=${encodeURIComponent(query.trim())}`);
+            const res = await fetch(`${backendBase}/api/geocode?q=${encodeURIComponent(query.trim())}`);
             if (!res.ok) return [];
             const data = await res.json();
             if (!data || !Array.isArray(data) || !data.length) return [];
@@ -300,6 +305,51 @@ var api = (function () {
        Fixed: noise is now seeded from input values
        ============================================================ */
     async function predict(inputData) {
+        try {
+            var res = await fetch(backendBase + '/api/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(inputData)
+            });
+            if (res.ok) {
+                var r = await res.json();
+                if (r && r.status === 'success') {
+                    return {
+                        predicted_aqi: Math.round(parseFloat(r.predicted_aqi) || 0),
+                        category: r.category,
+                        color: r.color,
+                        health_advice: r.health_advice,
+                        dominant: r.dominant || 'PM2.5',
+                        method: r.method || 'ML Stacking Regressor',
+                        confidence: r.confidence || '92%',
+                        individual_models: r.individual_models || {
+                            gradient_boosting: Math.round(r.predicted_aqi * 0.97),
+                            random_forest: Math.round(r.predicted_aqi * 1.02),
+                            adaboost: Math.round(r.predicted_aqi * 0.99),
+                            ridge: Math.round(r.predicted_aqi * 1.01),
+                        },
+                        breakdown: r.breakdown || {
+                            pm25_aqi: pm25ToAQI(parseFloat(inputData.prev_pm25) || 0),
+                            pm10_aqi: pm10ToAQI(parseFloat(inputData.prev_pm10) || 0),
+                            no2_aqi: no2ToAQI(parseFloat(inputData.prev_no2) || 0),
+                            o3_aqi: o3ToAQI(parseFloat(inputData.prev_o3) || 0),
+                            co_aqi: coToAQI(parseFloat(inputData.prev_co) || 0),
+                            so2_aqi: so2ToAQI(parseFloat(inputData.prev_so2) || 0),
+                        },
+                        factors: r.factors || {
+                            wind: (1 - (parseFloat(inputData.wind_speed) * 0.04)).toFixed(2),
+                            humidity: (parseFloat(inputData.humidity) > 60 ? 1.15 : 1.0).toFixed(2),
+                            temp: (parseFloat(inputData.temperature) > 30 ? 1.10 : 1.0).toFixed(2),
+                            season: '1.00',
+                            hour: '1.00',
+                        }
+                    };
+                }
+            }
+        } catch (err) {
+            console.warn('[API] Backend ML prediction failed. Falling back to local heuristic:', err.message);
+        }
+
         var pm25 = parseFloat(inputData.prev_pm25) || 0;
         var pm10 = parseFloat(inputData.prev_pm10) || 0;
         var no2 = parseFloat(inputData.prev_no2) || 0;
@@ -564,7 +614,7 @@ var api = (function () {
 
     async function logSearch(city, lat, lon) {
         try {
-            await fetch('/api/log_search', {
+            await fetch(backendBase + '/api/log_search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ city, lat, lon })

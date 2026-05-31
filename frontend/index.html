@@ -1,6 +1,34 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Fetch Interceptor for local files (file://) fallback to backend server -->
+    <script>
+        (function() {
+            var origin = window.location.origin;
+            if (!origin || origin.startsWith('file') || origin === 'null') {
+                var backendBase = 'http://localhost:5000';
+                var originalFetch = window.fetch;
+                window.fetch = function(input, init) {
+                    var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+                    if (url) {
+                        if (url.startsWith('/api/')) {
+                            url = backendBase + url;
+                        } else if (url.includes('/api/')) {
+                            var idx = url.indexOf('/api/');
+                            url = backendBase + url.substring(idx);
+                        }
+                        if (typeof input === 'string') {
+                            input = url;
+                        } else if (input && input.url) {
+                            input = new Request(url, input);
+                        }
+                    }
+                    return originalFetch(input, init);
+                };
+                console.log('🔧 [System] File protocol detected. Relative API fetches redirected to ' + backendBase);
+            }
+        })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AirWatch Pro - Air Quality Monitor</title>
@@ -1030,6 +1058,30 @@
                     <button class="tab-btn active" id="btnChart" onclick="switchHistoryView('chart', this)">
                         <i class="fas fa-chart-bar"></i> Graph
                     </button>
+                </div>
+            </div>
+
+            <!-- Historical Summary Cards -->
+            <div class="history-summary-grid anim-fade-up">
+                <div class="hs-card">
+                    <div style="font-size: 0.62rem; color: var(--txt3); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Peak AQI</div>
+                    <div id="hcPeak" style="font-size: 1.5rem; font-weight: 900; margin: 4px 0;">--</div>
+                    <div id="hcPeakTime" style="font-size: 0.62rem; color: var(--txt2);">--</div>
+                </div>
+                <div class="hs-card">
+                    <div style="font-size: 0.62rem; color: var(--txt3); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Best AQI</div>
+                    <div id="hcLow" style="font-size: 1.5rem; font-weight: 900; margin: 4px 0;">--</div>
+                    <div id="hcLowTime" style="font-size: 0.62rem; color: var(--txt2);">--</div>
+                </div>
+                <div class="hs-card">
+                    <div style="font-size: 0.62rem; color: var(--txt3); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">24h Average</div>
+                    <div id="hcAvg" style="font-size: 1.5rem; font-weight: 900; margin: 4px 0;">--</div>
+                    <div style="font-size: 0.62rem; color: var(--txt2);">Overall Status</div>
+                </div>
+                <div class="hs-card">
+                    <div style="font-size: 0.62rem; color: var(--txt3); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Dominant Pollutant</div>
+                    <div id="hcDom" style="font-size: 1.5rem; font-weight: 900; margin: 4px 0; color: var(--accent);">--</div>
+                    <div style="font-size: 0.62rem; color: var(--txt2);">Primary Source</div>
                 </div>
             </div>
 

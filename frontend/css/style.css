@@ -1744,6 +1744,31 @@ body {
 }
 
 /* ============================================================
+   HISTORICAL SUMMARY CARDS
+   ============================================================ */
+.history-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.hs-card {
+    background: var(--card);
+    border: 1px solid var(--brd);
+    border-radius: var(--r);
+    padding: 12px 8px;
+    text-align: center;
+    backdrop-filter: blur(16px);
+    box-shadow: var(--shadow);
+    transition: all 0.3s ease;
+}
+.hs-card:hover {
+    border-color: var(--brd2);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    transform: translateY(-2px);
+}
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 1400px) {
@@ -1779,6 +1804,11 @@ body {
     .download-wrap  { flex-direction: column; }
     .chart-tall     { height: 220px; }
     .extra-chart-wrap { height: 180px; }
+    .history-summary-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+@media (max-width: 480px) {
+    .history-summary-grid { grid-template-columns: 1fr !important; }
 }
 
 /* Chart heights by screen size */

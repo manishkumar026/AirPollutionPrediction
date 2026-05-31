@@ -347,9 +347,31 @@ var charts = (function () {
         var canvas = document.getElementById(canvasId);
         if (!canvas) return;
 
+        // Store data for redraw on hover
+        canvas._heatmapData = data;
+
         var ctx = canvas.getContext('2d');
         var w = canvas.width;
         var h = canvas.height;
+
+        // Set up mouse events for interactivity if not already done
+        if (!canvas._listenersAttached) {
+            canvas.addEventListener('mousemove', function(e) {
+                var rect = canvas.getBoundingClientRect();
+                var mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+                var mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+                canvas._hoverX = mouseX;
+                canvas._hoverY = mouseY;
+                heatmap(canvasId, canvas._heatmapData);
+            });
+            canvas.addEventListener('mouseleave', function() {
+                canvas._hoverX = null;
+                canvas._hoverY = null;
+                heatmap(canvasId, canvas._heatmapData);
+            });
+            canvas._listenersAttached = true;
+        }
+
         ctx.clearRect(0, 0, w, h);
 
         if (!data || !data.length) {
@@ -365,9 +387,9 @@ var charts = (function () {
             });
         }
 
-        var paddingLeft = 40; // Space for Y-axis labels
-        var paddingBottom = 30; // Space for X-axis labels
-        var paddingTop = 20; // Space for top padding
+        var paddingLeft = 50; // Space for Y-axis labels
+        var paddingBottom = 40; // Space for X-axis labels
+        var paddingTop = 30; // Space for top padding
         
         var chartWidth = w - paddingLeft - 20;
         var chartHeight = h - paddingBottom - paddingTop;
@@ -375,35 +397,59 @@ var charts = (function () {
         var maxAqi = Math.max.apply(null, data.map(function(d) { return d.aqi || 50; })) || 200;
         maxAqi = Math.max(maxAqi, 200); // Scale up to at least 200 to match image style
         
-        // --- DRAW GRID LINES ---
+        // --- 1. DRAW BACKGROUND AQI ZONE SHADING ---
+        var zones = [
+            { yMin: 0,   yMax: 50,  color: 'rgba(0, 228, 0, 0.05)' },
+            { yMin: 50,  yMax: 100, color: 'rgba(255, 255, 0, 0.04)' },
+            { yMin: 100, yMax: 150, color: 'rgba(255, 126, 0, 0.04)' },
+            { yMin: 150, yMax: 200, color: 'rgba(255, 0, 0, 0.04)' },
+            { yMin: 200, yMax: maxAqi, color: 'rgba(143, 63, 151, 0.05)' }
+        ];
+
+        zones.forEach(function(z) {
+            if (z.yMin > maxAqi) return;
+            var yStart = paddingTop + chartHeight - (Math.min(z.yMax, maxAqi) / maxAqi) * chartHeight;
+            var yEnd = paddingTop + chartHeight - (z.yMin / maxAqi) * chartHeight;
+            ctx.fillStyle = z.color;
+            ctx.fillRect(paddingLeft, yStart, chartWidth, yEnd - yStart);
+        });
+
+        // --- 2. DRAW GRID LINES ---
         var gridLines = [0, 50, 100, 150, 200];
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.font = '10px Space Grotesk';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.font = '10px Space Grotesk, Inter';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
 
         gridLines.forEach(function(val) {
             var y = paddingTop + chartHeight - (val / maxAqi) * chartHeight;
             
-            // Draw line
+            // Draw grid line
             ctx.beginPath();
             ctx.moveTo(paddingLeft, y);
             ctx.lineTo(paddingLeft + chartWidth, y);
             ctx.stroke();
             
             // Draw label
-            ctx.fillText(val, paddingLeft - 5, y);
+            ctx.fillText(val, paddingLeft - 8, y);
         });
 
-        // --- DRAW BARS ---
-        var barWidth = (chartWidth / data.length) - 1; // 1px gap
+        // --- 3. DRAW BARS ---
+        var barWidth = (chartWidth / data.length) - 2; // 2px gap
         if (barWidth < 1) barWidth = 1;
 
-        ctx.textAlign = 'center';
-        
+        var hoveredIndex = -1;
+        if (canvas._hoverX !== null && canvas._hoverX !== undefined) {
+            var relativeX = canvas._hoverX - paddingLeft;
+            if (relativeX >= 0 && relativeX < chartWidth) {
+                hoveredIndex = Math.floor(relativeX / (chartWidth / data.length));
+            }
+        }
+
         data.forEach(function (d, i) {
-            var aqi = d.aqi || 0;
+            var aqi = Math.round(d.aqi || 0);
             
             // Get color from AQI
             var color = '#00e400'; // Good
@@ -414,22 +460,122 @@ var charts = (function () {
             if (aqi > 300) color = '#7e0023'; // Hazardous
 
             var barHeight = (aqi / maxAqi) * chartHeight;
-            if (barHeight < 2) barHeight = 2; // Min height
+            if (barHeight < 3) barHeight = 3; // Min height
 
             var x = paddingLeft + i * (chartWidth / data.length);
             var y = paddingTop + chartHeight - barHeight;
 
-            // Draw bar (Rectangle, no rounded corners)
-            ctx.fillStyle = color;
+            // Draw bar with vertical gradient
+            var grad = ctx.createLinearGradient(0, y, 0, paddingTop + chartHeight);
+            var isHovered = (i === hoveredIndex);
+            
+            grad.addColorStop(0.0, color + (isHovered ? 'ff' : 'bb')); // Brighter on hover
+            grad.addColorStop(1.0, color + '15'); // Fade out towards bottom
+
+            ctx.fillStyle = grad;
             ctx.fillRect(x, y, barWidth, barHeight);
+
+            // Draw solid glowing cap at the top of the bar
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, barWidth, 3);
 
             // Time Label (every 3 hours)
             if (i % 3 === 0) {
-                ctx.fillStyle = 'rgba(255,255,255,0.5)';
-                ctx.font = '9px Space Grotesk';
-                ctx.fillText(d.hour_label || '', x + barWidth / 2, h - 10);
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.font = '9px Space Grotesk, Inter';
+                ctx.textAlign = 'center';
+                ctx.fillText(d.hour_label || '', x + barWidth / 2, h - 15);
             }
         });
+
+        // --- 4. DRAW HOVER LINE AND TOOLTIP ---
+        if (hoveredIndex >= 0 && hoveredIndex < data.length) {
+            var d = data[hoveredIndex];
+            var aqi = Math.round(d.aqi || 0);
+            var x = paddingLeft + hoveredIndex * (chartWidth / data.length) + (barWidth / 2);
+            var y = paddingTop + chartHeight - ((aqi / maxAqi) * chartHeight);
+
+            // Draw vertical hover indicator line
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(x, paddingTop);
+            ctx.lineTo(x, paddingTop + chartHeight);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw hover bubble on the bar cap
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = getAQIColor(aqi);
+            ctx.shadowBlur = 10;
+            ctx.fill();
+            ctx.shadowBlur = 0; // reset shadow
+
+            // Determine status text and color
+            var color = getAQIColor(aqi);
+            var status = getAQILabel(aqi);
+
+            // Draw floating Tooltip Box
+            var tooltipW = 155;
+            var tooltipH = 75;
+            var tooltipX = x + 15;
+            var tooltipY = y - 30;
+
+            // Make sure tooltip doesn't draw off-canvas
+            if (tooltipX + tooltipW > w - 10) {
+                tooltipX = x - tooltipW - 15;
+            }
+            if (tooltipY < 10) {
+                tooltipY = 10;
+            }
+
+            // Draw Tooltip Container
+            ctx.fillStyle = 'rgba(10, 15, 30, 0.95)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.lineWidth = 1;
+            
+            // Rounded corners for tooltip
+            roundRect(ctx, tooltipX, tooltipY, tooltipW, tooltipH, 8, true, true);
+
+            // Draw Tooltip Text
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'alphabetic';
+            
+            // 1. Time Label
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.font = 'bold 9px Space Grotesk, Inter';
+            ctx.fillText('🕒 ' + (d.hour_label || ''), tooltipX + 10, tooltipY + 16);
+
+            // 2. AQI Value
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 16px Space Grotesk, Inter';
+            ctx.fillText(aqi, tooltipX + 10, tooltipY + 40);
+            
+            ctx.fillStyle = color;
+            ctx.font = 'bold 9px Space Grotesk, Inter';
+            ctx.fillText('AQI', tooltipX + 45, tooltipY + 34);
+
+            // 3. Status Category
+            ctx.fillStyle = color;
+            ctx.font = 'bold 9px Space Grotesk, Inter';
+            
+            // Handle long status strings to prevent overflow
+            var displayStatus = status;
+            if (displayStatus.length > 22) {
+                displayStatus = displayStatus.substring(0, 19) + '...';
+            }
+            ctx.fillText(displayStatus, tooltipX + 10, tooltipY + 58);
+            
+            // 4. Dominant Pollutant (if available)
+            if (d.dominant) {
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.font = '7px Space Grotesk, Inter';
+                ctx.fillText('DOMINANT: ' + d.dominant, tooltipX + 10, tooltipY + 68);
+            }
+        }
     }
 
     function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
@@ -462,7 +608,7 @@ var charts = (function () {
 })();
 
 /* ============================================================
-   Helper needed by charts tooltip
+   Helpers needed by charts tooltip & heatmap
    ============================================================ */
 if (typeof getAQILabel === 'undefined') {
     function getAQILabel(aqi) {
@@ -473,5 +619,17 @@ if (typeof getAQILabel === 'undefined') {
         if (aqi <= 200) return 'Unhealthy';
         if (aqi <= 300) return 'Very Unhealthy';
         return 'Hazardous';
+    }
+}
+
+if (typeof getAQIColor === 'undefined') {
+    function getAQIColor(aqi) {
+        aqi = parseFloat(aqi) || 0;
+        if (aqi <=  50) return '#00e400';
+        if (aqi <= 100) return '#ffff00';
+        if (aqi <= 150) return '#ff7e00';
+        if (aqi <= 200) return '#ff0000';
+        if (aqi <= 300) return '#8f3f97';
+        return '#7e0023';
     }
 }

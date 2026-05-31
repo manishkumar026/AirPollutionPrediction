@@ -6,6 +6,15 @@ document.addEventListener('DOMContentLoaded', function() {
     initThreeBackground();
     initAuthFlow();
     initPasswordToggles();
+    
+    // Social Login buttons handler
+    document.querySelectorAll('.social-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const provider = this.querySelector('img') ? this.querySelector('img').alt : 'Social';
+            showToast(`${provider} Login is a premium mockup feature. Please use username & password to sign in!`, 'info');
+        });
+    });
 });
 
 /**
@@ -148,6 +157,7 @@ function initAuthFlow() {
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const btn = document.getElementById('reg-btn');
+        const email = document.getElementById('reg-email').value;
         const username = document.getElementById('reg-username').value;
         const password = document.getElementById('reg-password').value;
         const confirm = document.getElementById('reg-confirm').value;
@@ -163,7 +173,7 @@ function initAuthFlow() {
             const res = await fetch('/api/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, email, password })
             });
             const data = await res.json();
             

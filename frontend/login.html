@@ -2,6 +2,34 @@
 <html lang="en">
 
 <head>
+    <!-- Fetch Interceptor for local files (file://) fallback to backend server -->
+    <script>
+        (function() {
+            var origin = window.location.origin;
+            if (!origin || origin.startsWith('file') || origin === 'null') {
+                var backendBase = 'http://localhost:5000';
+                var originalFetch = window.fetch;
+                window.fetch = function(input, init) {
+                    var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+                    if (url) {
+                        if (url.startsWith('/api/')) {
+                            url = backendBase + url;
+                        } else if (url.includes('/api/')) {
+                            var idx = url.indexOf('/api/');
+                            url = backendBase + url.substring(idx);
+                        }
+                        if (typeof input === 'string') {
+                            input = url;
+                        } else if (input && input.url) {
+                            input = new Request(url, input);
+                        }
+                    }
+                    return originalFetch(input, init);
+                };
+                console.log('🔧 [System] File protocol detected. Relative API fetches redirected to ' + backendBase);
+            }
+        })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login & Register - AirWatch Pro</title>
@@ -54,10 +82,10 @@
                         </div>
 
                         <div class="input-group">
-                            <label for="login-username">Username</label>
+                            <label for="login-username">Email or Username</label>
                             <div class="input-wrapper">
-                                <i class="fas fa-user"></i>
-                                <input type="text" id="login-username" placeholder="Enter username" required
+                                <i class="fas fa-envelope"></i>
+                                <input type="text" id="login-username" placeholder="Enter email or username" required
                                     autocomplete="username">
                             </div>
                         </div>
@@ -108,6 +136,14 @@
                         <div class="form-title">
                             <h2>Create account</h2>
                             <p>Start your journey towards cleaner air</p>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="reg-email">Email Address</label>
+                            <div class="input-wrapper">
+                                <i class="fas fa-envelope"></i>
+                                <input type="email" id="reg-email" placeholder="Enter email address" required>
+                            </div>
                         </div>
 
                         <div class="input-group">

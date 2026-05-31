@@ -2,8 +2,12 @@
 # FLASK SERVER - AIRWATCH PRO (MYSQL / XAMPP VERSION)
 # ================================================
 
+
+
 from flask import Flask, jsonify, request, send_from_directory, session, redirect, url_for, make_response
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit
+import random
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -29,6 +33,7 @@ app = Flask(
 )
 app.config['SECRET_KEY'] = 'airwatch-pro-secret-key-123'
 CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # ---- DATABASE CONFIG (PostgreSQL / MySQL with SQLite Fallback) ----
 database_url = os.environ.get("DATABASE_URL")
@@ -65,6 +70,7 @@ db = SQLAlchemy(app)
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=True)
     password = db.Column(db.String(200), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -91,6 +97,22 @@ def load_user(user_id):
 with app.app_context():
     try:
         db.create_all()
+        # Perform dynamic database migration to add 'email' column if it doesn't exist
+        try:
+            from sqlalchemy import inspect
+            inspector = inspect(db.engine)
+            if 'user' in inspector.get_table_names():
+                columns = [c['name'] for c in inspector.get_columns('user')]
+                if 'email' not in columns:
+                    print("🔧 Migrating database: Adding 'email' column to 'user' table...")
+                    from sqlalchemy import text
+                    with db.engine.connect() as conn:
+                        conn.execute(text("ALTER TABLE user ADD COLUMN email VARCHAR(120) NULL"))
+                        conn.commit()
+                    print("✅ Database migration successful.")
+        except Exception as mig_err:
+            print(f"⚠️ Database migration info: {mig_err}")
+
         if not User.query.filter_by(username='admin').first():
             admin = User(
                 username='admin',
@@ -116,12 +138,20 @@ predictor = AQIPredictor()
 def register():
     try:
         data = request.json
-        if User.query.filter_by(username=data['username']).first():
+        username = data.get('username')
+        email = data.get('email')
+        password = data.get('password')
+        
+        if User.query.filter_by(username=username).first():
             return jsonify({"status": "error", "message": "Username already exists"}), 400
         
+        if email and User.query.filter_by(email=email).first():
+            return jsonify({"status": "error", "message": "Email already exists"}), 400
+        
         new_user = User(
-            username=data['username'],
-            password=generate_password_hash(data['password']),
+            username=username,
+            email=email,
+            password=generate_password_hash(password),
             is_admin=False
         )
         db.session.add(new_user)
@@ -134,11 +164,14 @@ def register():
 def login():
     try:
         data = request.json
-        user = User.query.filter_by(username=data['username']).first()
-        if user and check_password_hash(user.password, data['password']):
+        identifier = data.get('username')
+        password = data.get('password')
+        
+        user = User.query.filter((User.username == identifier) | (User.email == identifier)).first()
+        if user and check_password_hash(user.password, password):
             login_user(user)
-            return jsonify({"status": "success", "user": {"username": user.username, "is_admin": user.is_admin}})
-        return jsonify({"status": "error", "message": "Invalid credentials"}), 401
+            return jsonify({"status": "success", "user": {"username": user.username, "email": user.email, "is_admin": user.is_admin}})
+        return jsonify({"status": "error", "message": "Invalid username/email or password"}), 401
     except Exception as e:
         return jsonify({"status": "error", "message": f"Database error: {e}"}), 500
 
@@ -280,6 +313,16 @@ def data_files(filename): return send_from_directory("../frontend/data", filenam
 # ================================================
 # INDIVIDUAL API ROUTES (used by frontend fetchAll)
 # ================================================
+
+@app.route("/api/predict", methods=["POST"])
+def api_predict():
+    try:
+        data = request.json or {}
+        result = predictor.predict(data)
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/api/pollution")
 def api_pollution():
